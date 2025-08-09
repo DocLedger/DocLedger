@@ -55,3 +55,6 @@ app.*.map.json
 *.msix
 *.msixupload
 *.pfx
+
+# Project local docs not for VCS
+CONTEXT.md
