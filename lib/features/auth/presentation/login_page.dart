@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../welcome/presentation/welcome_page.dart';
+import '../../shell/desktop_shell.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -55,7 +56,8 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     if (!mounted) return;
-    Navigator.of(context).pushReplacementNamed(WelcomePage.routeName);
+    // On desktop, go to the new desktop shell; mobile can still use Welcome if needed
+    Navigator.of(context).pushReplacementNamed(DesktopShell.routeName);
   }
 
   @override

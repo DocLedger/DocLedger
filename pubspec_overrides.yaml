@@ -1,0 +1,8 @@
+# Local-only overrides for Linux desktop development
+# This file is not required for Android/Windows builds.
+# If you build Android on this machine, temporarily rename this file.
+
+dependency_overrides:
+  flutter_secure_storage:
+    path: third_party/flutter_secure_storage_stub
+

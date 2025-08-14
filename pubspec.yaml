@@ -34,6 +34,36 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  
+  # Google Drive integration
+  google_sign_in: ^6.2.1
+  googleapis: ^13.2.0
+  googleapis_auth: ^1.6.0
+  http: ^1.2.0
+  
+  # Encryption and security
+  crypto: ^3.0.3
+  encrypt: ^5.0.3
+  device_info_plus: ^10.1.2
+  flutter_secure_storage: ^9.2.2
+  
+  # Background services and connectivity
+  workmanager: ^0.9.0+2
+  connectivity_plus: ^6.0.5
+  
+  # Database
+  sqflite: ^2.3.3
+  sqflite_common_ffi: ^2.3.3
+  path: ^1.9.0
+  
+  # Dependency injection
+  get_it: ^7.7.0
+  
+  # Compression
+  archive: ^3.6.1
+  
+  # Internationalization
+  intl: ^0.19.0
 
 dev_dependencies:
   flutter_test:
@@ -45,6 +75,16 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+  
+  # Database testing
+  
+  # Mocking for tests
+  mockito: ^5.4.4
+  build_runner: ^2.4.12
+  
+  # Integration testing
+  integration_test:
+    sdk: flutter
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -56,6 +96,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+## Note: For Linux desktop testing we used a stub of flutter_secure_storage.
+## For Android/Windows real builds, keep overrides disabled.
 
   # To add assets to your application, add an assets section, like this:
   # assets:

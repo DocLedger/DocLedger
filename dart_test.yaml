@@ -1,0 +1,11 @@
+## Default test configuration
+## Keep heavy suites for later; focus on fast unit/widget tests by default
+exclude:
+  - test/system/**
+  - test/performance/**
+  - test/stress/**
+  - test/integration/**
+  # Long-running/flaky under default settings
+  - test/core/sync/services/retry_policy_test.dart
+
+

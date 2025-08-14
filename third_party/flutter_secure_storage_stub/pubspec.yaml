@@ -1,0 +1,7 @@
+name: flutter_secure_storage
+description: Stub package to disable linux linking for desktop demo
+version: 9.2.4
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
