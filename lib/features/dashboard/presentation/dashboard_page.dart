@@ -37,8 +37,8 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     if (widget.embedded) {
-      // In desktop shell, show Home content only; navigation is provided by the shell
-      return const Scaffold(body: _HomeTab());
+      // When embedded inside another Scaffold (desktop or mobile shells), return the content directly
+      return const _HomeTab();
     }
     return Scaffold(
       body: _pages[_index],
@@ -62,11 +62,14 @@ class _HomeTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme;
     final repo = serviceLocator.get<DataRepository>();
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const SizedBox(height: 12),
-        FutureBuilder<List<dynamic>>(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 700;
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          children: [
+            const SizedBox(height: 12),
+            FutureBuilder<List<dynamic>>(
           future: Future.wait([
             repo.getPatientCount(),
             repo.getTodayVisitCount(),
@@ -79,135 +82,187 @@ class _HomeTab extends StatelessWidget {
             final todayVisits = data != null ? data[1] as int : 0;
             final monthRevenue = data != null ? data[2] as double : 0.0;
             final pendingFollowUps = data != null ? data[3] as int : 0;
+            Widget buildMetric(String title, String value, IconData icon) {
+              final content = _MetricTile(title: title, value: value, icon: icon);
+              return _DashboardCard(
+                child: SizedBox(
+                  height: isCompact ? 128 : 140,
+                  child: content,
+                ),
+              );
+            }
+            final tiles = <Widget>[
+              buildMetric('Total Patients', patients.toString(), Icons.people),
+              buildMetric("Today's Visits", todayVisits.toString(), Icons.event_available),
+              buildMetric('This Month Revenue', 'Rs.${monthRevenue.toStringAsFixed(0)}', Icons.payments),
+              buildMetric('Follow-ups (7d)', pendingFollowUps.toString(), Icons.schedule),
+            ];
+            if (isCompact) {
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  mainAxisExtent: 128, // taller cards to avoid overflow
+                ),
+                itemCount: tiles.length,
+                itemBuilder: (_, i) => tiles[i],
+              );
+            }
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: _DashboardCard(
-                    child: SizedBox(
-                      height: 160,
-                      child: _MetricTile(title: 'Total Patients', value: patients.toString(), icon: Icons.people),
-                    ),
-                  ),
-                ),
+                Expanded(child: tiles[0]),
                 const SizedBox(width: 12),
-                Expanded(
-                  child: _DashboardCard(
-                    child: SizedBox(
-                      height: 160,
-                      child: _MetricTile(title: "Today's Visits", value: todayVisits.toString(), icon: Icons.event_available),
-                    ),
-                  ),
-                ),
+                Expanded(child: tiles[1]),
                 const SizedBox(width: 12),
-                Expanded(
-                  child: _DashboardCard(
-                    child: SizedBox(
-                      height: 160,
-                      child: _MetricTile(title: 'This Month Revenue', value: '৳${monthRevenue.toStringAsFixed(0)}', icon: Icons.payments),
-                    ),
-                  ),
-                ),
+                Expanded(child: tiles[2]),
                 const SizedBox(width: 12),
-                Expanded(
-                  child: _DashboardCard(
-                    child: SizedBox(
-                      height: 160,
-                      child: _MetricTile(title: 'Follow-ups (7d)', value: pendingFollowUps.toString(), icon: Icons.schedule),
-                    ),
-                  ),
-                ),
+                Expanded(child: tiles[3]),
               ],
             );
           },
         ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _DashboardCard(
-                child: SizedBox(
-                  height: 260,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _SectionTitle('Upcoming Follow-ups'),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: FutureBuilder(
-                          future: repo.getUpcomingFollowUps(limit: 6),
-                          builder: (context, snapshot) {
-                            final items = snapshot.data ?? const <dynamic>[];
-                            if (items.isEmpty) {
-                              return const Center(child: Text('No upcoming follow-ups'));
-                            }
-                            return ListView.separated(
-                              itemCount: items.length,
-                              separatorBuilder: (_, __) => const Divider(height: 8),
-                              itemBuilder: (context, i) {
-                                final v = items[i] as models.Visit;
-                                return Row(
-                                  children: [
-                                    const Icon(Icons.schedule, size: 18),
-                                    const SizedBox(width: 8),
-                                    Expanded(child: Text(v.diagnosis ?? 'Visit')),
-                                    Text(_date(v.followUpDate ?? v.visitDate)),
-                                  ],
-                                );
-                              },
-                            );
-                          },
+            const SizedBox(height: 12),
+            if (isCompact)
+              Column(
+                children: [
+                  _DashboardCard(
+                    child: SizedBox(
+                      height: 260,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const _SectionTitle('Upcoming Follow-ups'),
+                          const SizedBox(height: 8),
+                          Expanded(child: _UpcomingList(repo: repo)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _DashboardCard(
+                    child: SizedBox(
+                      height: 260,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const _SectionTitle('Recent Patients'),
+                          const SizedBox(height: 8),
+                          Expanded(child: _RecentPatientsList(repo: repo)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: _DashboardCard(
+                      child: SizedBox(
+                        height: 260,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionTitle('Upcoming Follow-ups'),
+                            const SizedBox(height: 8),
+                            Expanded(child: _UpcomingList(repo: repo)),
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _DashboardCard(
-                child: SizedBox(
-                  height: 260,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _SectionTitle('Recent Patients'),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: FutureBuilder(
-                          future: repo.getRecentPatients(limit: 6),
-                          builder: (context, snapshot) {
-                            final items = snapshot.data ?? const <dynamic>[];
-                            if (items.isEmpty) {
-                              return const Center(child: Text('No recent patients'));
-                            }
-                            return ListView.separated(
-                              itemCount: items.length,
-                              separatorBuilder: (_, __) => const Divider(height: 8),
-                              itemBuilder: (context, i) {
-                                final p = items[i] as models.Patient;
-                                return Row(
-                                  children: [
-                                    const CircleAvatar(radius: 12, child: Icon(Icons.person, size: 14)),
-                                    const SizedBox(width: 8),
-                                    Expanded(child: Text(p.name)),
-                                    Text(p.phone),
-                                  ],
-                                );
-                              },
-                            );
-                          },
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _DashboardCard(
+                      child: SizedBox(
+                        height: 260,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionTitle('Recent Patients'),
+                            const SizedBox(height: 8),
+                            Expanded(child: _RecentPatientsList(repo: repo)),
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
-            ),
           ],
-        ),
-      ],
+        );
+      },
+    );
+  }
+}
+
+class _UpcomingList extends StatelessWidget {
+  final DataRepository repo;
+  const _UpcomingList({required this.repo});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder(
+      future: repo.getUpcomingFollowUps(limit: 6),
+      builder: (context, snapshot) {
+        final items = snapshot.data ?? const <dynamic>[];
+        if (items.isEmpty) {
+          return const Center(child: Text('No upcoming follow-ups'));
+        }
+        return ListView.separated(
+          itemCount: items.length,
+          separatorBuilder: (_, __) => const Divider(height: 8),
+          itemBuilder: (context, i) {
+            final v = items[i] as models.Visit;
+            return Row(
+              children: [
+                const Icon(Icons.schedule, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Text(v.diagnosis ?? 'Visit')),
+                Text(_date(v.followUpDate ?? v.visitDate)),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _RecentPatientsList extends StatelessWidget {
+  final DataRepository repo;
+  const _RecentPatientsList({required this.repo});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder(
+      future: repo.getRecentPatients(limit: 6),
+      builder: (context, snapshot) {
+        final items = snapshot.data ?? const <dynamic>[];
+        if (items.isEmpty) {
+          return const Center(child: Text('No recent patients'));
+        }
+        return ListView.separated(
+          itemCount: items.length,
+          separatorBuilder: (_, __) => const Divider(height: 8),
+          itemBuilder: (context, i) {
+            final p = items[i] as models.Patient;
+            return Row(
+              children: [
+                const CircleAvatar(radius: 12, child: Icon(Icons.person, size: 14)),
+                const SizedBox(width: 8),
+                Expanded(child: Text(p.name)),
+                Text(p.phone),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -345,8 +400,8 @@ class _MetricTile extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
-          width: 44,
-          height: 44,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(
             color: color.primary.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(12),
@@ -359,9 +414,21 @@ class _MetricTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(title, style: const TextStyle(color: Colors.grey)),
+              Text(
+                title,
+                style: const TextStyle(color: Colors.grey, fontSize: 14),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+              ),
               const SizedBox(height: 4),
-              Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              Text(
+                value,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+              ),
             ],
           ),
         ),

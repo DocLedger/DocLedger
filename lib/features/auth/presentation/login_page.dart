@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../welcome/presentation/welcome_page.dart';
 import '../../shell/desktop_shell.dart';
 
 class LoginPage extends StatefulWidget {
