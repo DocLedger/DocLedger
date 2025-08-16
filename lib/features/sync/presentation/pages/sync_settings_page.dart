@@ -61,14 +61,14 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildSyncSection(),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
                   _buildBackupSection(),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
                   _buildStorageSection(),
-                  const SizedBox(height: 24),
-                   _buildAdvancedSection(),
-                   const SizedBox(height: 24),
-                   _buildActionsSection(),
+                  const SizedBox(height: 16),
+                  _buildAdvancedSection(),
+                  const SizedBox(height: 12),
+                  _buildActionsSection(),
                 ],
               ),
             ),
@@ -77,8 +77,9 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
 
   Widget _buildSyncSection() {
     return Card(
+      margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(14.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -87,6 +88,17 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
+            ),
+            SwitchListTile(
+              title: const Text('Encrypt backups (AES‑GCM)')
+              ,subtitle: const Text('Recommended. Disable only for debugging/plain JSON'),
+              value: _settings.encryptBackups,
+              onChanged: (value) {
+                setState(() {
+                  _settings = _settings.copyWith(encryptBackups: value);
+                });
+                widget.onSettingsChanged?.call(_settings);
+              },
             ),
             const SizedBox(height: 16),
             SwitchListTile(
@@ -131,10 +143,13 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
   Widget _buildActionsSection() {
     final drive = serviceLocator.get<GoogleDriveService>();
     final sync = serviceLocator.get<SyncService>();
+    // propagate toggle into service
+    sync.setEncryptBackups(_settings.encryptBackups);
 
     return Card(
+      margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(14.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -145,85 +160,154 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                   ),
             ),
             const SizedBox(height: 12),
+            // Row 1: Link account button + email/status
             Row(
               children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    icon: const Icon(Icons.login),
-                    label: Text(drive.isAuthenticated ? 'Linked: ${drive.currentAccount?.email ?? ''}' : 'Link Google Account'),
-                    onPressed: _isLoading
-                        ? null
-                        : () async {
-                            setState(() => _isLoading = true);
-                            try {
-                              final ok = await drive.authenticate(forceAccountSelection: !drive.isAuthenticated);
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(ok ? 'Google linked' : 'Cancelled')),
-                              );
-                              setState(() {});
-                            } catch (e) {
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Auth failed: $e')),
-                              );
-                            } finally {
-                              if (mounted) setState(() => _isLoading = false);
-                            }
-                          },
-                  ),
+                _ActionButton(
+                  icon: Icons.login,
+                  label: drive.isAuthenticated ? 'Switch Account' : 'Link Google Account',
+                  primary: true,
+                  onPressed: _isLoading
+                      ? null
+                      : () async {
+                          setState(() => _isLoading = true);
+                          try {
+                            final ok = await drive.authenticate(forceAccountSelection: true);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(ok ? 'Google linked' : 'Cancelled')),
+                            );
+                            setState(() {});
+                          } catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Auth failed: $e')),
+                            );
+                          } finally {
+                            if (mounted) setState(() => _isLoading = false);
+                          }
+                        },
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.cloud_upload),
-                    label: const Text('Create Backup'),
-                    onPressed: _isLoading
-                        ? null
-                        : () async {
-                            setState(() => _isLoading = true);
-                            try {
-                              final res = await sync.createBackup();
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(res.isSuccess ? 'Backup complete' : 'Backup failed')),
-                              );
-                            } catch (e) {
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Backup error: $e')),
-                              );
-                            } finally {
-                              if (mounted) setState(() => _isLoading = false);
-                            }
-                          },
+                  child: Text(
+                    drive.isAuthenticated
+                        ? 'Linked account: ${drive.currentAccount?.email ?? ''}'
+                        : 'No Google account linked',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.sync),
-              label: const Text('Run Incremental Sync'),
-              onPressed: _isLoading
-                  ? null
-                  : () async {
-                      setState(() => _isLoading = true);
-                      try {
-                        final res = await sync.performIncrementalSync();
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(res.isSuccess ? 'Sync complete' : 'Sync failed')),
-                        );
-                      } catch (e) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Sync error: $e')),
-                        );
-                      } finally {
-                        if (mounted) setState(() => _isLoading = false);
-                      }
-                    },
+            const SizedBox(height: 16),
+            // Row 2: Buttons with per-action descriptions
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 860;
+                final items = <Widget>[
+                  _ActionWithHelp(
+                    button: _ActionButton(
+                      icon: Icons.sync,
+                      label: 'Run Incremental Sync',
+                      onPressed: _isLoading
+                          ? null
+                          : () async {
+                              setState(() => _isLoading = true);
+                              try {
+                                final res = await sync.performIncrementalSync();
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(res.isSuccess ? 'Sync complete' : 'Sync failed')),
+                                );
+                              } catch (e) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Sync error: $e')),
+                                );
+                              } finally {
+                                if (mounted) setState(() => _isLoading = false);
+                              }
+                            },
+                    ),
+                    help: 'Uploads recent local changes and pulls the latest backup to merge.',
+                  ),
+                  _ActionWithHelp(
+                    button: _ActionButton(
+                      icon: Icons.cloud_upload,
+                      label: 'Create Backup',
+                      onPressed: _isLoading
+                          ? null
+                          : () async {
+                              setState(() => _isLoading = true);
+                              try {
+                                final res = await sync.createBackup();
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(res.isSuccess ? 'Backup complete' : 'Backup failed')),
+                                );
+                              } catch (e) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Backup error: $e')),
+                                );
+                              } finally {
+                                if (mounted) setState(() => _isLoading = false);
+                              }
+                            },
+                    ),
+                    help: 'Creates a full ${_settings.encryptBackups ? 'encrypted' : 'plain JSON'} snapshot to Google Drive.',
+                  ),
+                  _ActionWithHelp(
+                    button: _ActionButton(
+                      icon: Icons.restore,
+                      label: 'Restore Latest Backup',
+                      onPressed: _isLoading
+                          ? null
+                          : () async {
+                              setState(() => _isLoading = true);
+                              try {
+                                final res = await sync.restoreLatestBackup();
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(res.isSuccess ? 'Restore complete' : 'Restore failed')),
+                                );
+                              } catch (e) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Restore error: $e')),
+                                );
+                              } finally {
+                                if (mounted) setState(() => _isLoading = false);
+                              }
+                            },
+                    ),
+                    help: 'Downloads and imports the most recent backup file from Drive.',
+                  ),
+                ];
+
+                if (isWide) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: items[0]),
+                      const SizedBox(width: 12),
+                      Expanded(child: items[1]),
+                      const SizedBox(width: 12),
+                      Expanded(child: items[2]),
+                    ],
+                  );
+                }
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: items,
+                );
+              },
             ),
           ],
         ),
@@ -233,8 +317,9 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
 
   Widget _buildBackupSection() {
     return Card(
+      margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(14.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -275,8 +360,9 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
 
   Widget _buildStorageSection() {
     return Card(
+      margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(14.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -534,9 +620,11 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
     showDialog<int>(
       context: context,
       builder: (context) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         title: const Text('Backup Frequency'),
         content: SizedBox(
-          width: double.maxFinite,
+          width: 520,
+          height: 360,
           child: ListView(
             shrinkWrap: true,
             children: frequencies.map((freq) {
@@ -582,9 +670,11 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
     showDialog<int>(
       context: context,
       builder: (context) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         title: const Text('Backup Retention'),
         content: SizedBox(
-          width: double.maxFinite,
+          width: 520,
+          height: 360,
           child: ListView(
             shrinkWrap: true,
             children: retentions.map((retention) {
@@ -626,9 +716,11 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
     showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         title: const Text('Conflict Resolution Strategy'),
         content: SizedBox(
-          width: double.maxFinite,
+          width: 520,
+          height: 400,
           child: ListView(
             shrinkWrap: true,
             children: strategies.map((strategy) {
@@ -677,5 +769,72 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
         });
       }
     }
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  final bool primary;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    this.onPressed,
+    this.primary = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final style = OutlinedButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      side: BorderSide(color: scheme.outlineVariant),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      foregroundColor: scheme.onSurface,
+      backgroundColor: primary ? scheme.primary : scheme.surface,
+    );
+
+    final child = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 18, color: primary ? scheme.onPrimary : scheme.primary),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: primary ? scheme.onPrimary : scheme.onSurface,
+          ),
+        ),
+      ],
+    );
+
+    return OutlinedButton(onPressed: onPressed, style: style, child: child);
+  }
+}
+
+class _ActionWithHelp extends StatelessWidget {
+  final Widget button;
+  final String help;
+  const _ActionWithHelp({required this.button, required this.help});
+
+  @override
+  Widget build(BuildContext context) {
+    final helpStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        button,
+        const SizedBox(height: 6),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Text(help, style: helpStyle),
+        ),
+      ],
+    );
   }
 }

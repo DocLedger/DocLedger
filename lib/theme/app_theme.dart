@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 /// Secondary/Accent: Red (cross)
 /// Neutrals: Dark gray for headings
 class AppTheme {
-  static const Color _primaryBlue = Color(0xFF35B6F2); // logo light blue
-  static const Color _primaryBlueDark = Color(0xFF1E9BD6);
-  static const Color _accentRed = Color(0xFFE53935);
-  static const Color _headingGray = Color(0xFF4A4A4A);
+  static const Color _primaryBlue = Color(0xFF3DBDEC); // #3dbdec LightBlue
+  static const Color _primaryBlueDark = Color(0xFF2FA6D3);
+  static const Color _accentRed = Color(0xFFFF3131); // #ff3131 Red
+  static const Color _headingGray = Color(0xFF545454); // #545454 Dark Grey
   static const Color _background = Color(0xFFF4F8FB); // dashboard bg
   static const Color _card = Color(0xFFFFFFFF);
   static const Color _cardBorder = Color(0xFFE6EEF4);
@@ -37,7 +37,8 @@ class AppTheme {
         centerTitle: false,
         titleTextStyle: base.textTheme.titleLarge?.copyWith(
           color: _headingGray,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w800,
+          fontSize: 22,
         ),
       ),
       // Input decoration theme defined below
@@ -55,11 +56,11 @@ class AppTheme {
       textTheme: base.textTheme.copyWith(
         headlineSmall: base.textTheme.headlineSmall?.copyWith(
           color: _headingGray,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w800,
         ),
         titleLarge: base.textTheme.titleLarge?.copyWith(
           color: _headingGray,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w800,
         ),
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(

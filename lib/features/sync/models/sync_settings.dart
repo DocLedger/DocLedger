@@ -7,6 +7,7 @@ class SyncSettings {
   final int maxBackupRetentionDays;
   final bool enableConflictResolution;
   final String conflictResolutionStrategy;
+  final bool encryptBackups; // new
 
   const SyncSettings({
     this.autoBackupEnabled = true,
@@ -16,6 +17,7 @@ class SyncSettings {
     this.maxBackupRetentionDays = 30,
     this.enableConflictResolution = true,
     this.conflictResolutionStrategy = 'last_write_wins',
+    this.encryptBackups = true,
   });
 
   Map<String, dynamic> toJson() {
@@ -27,6 +29,7 @@ class SyncSettings {
       'max_backup_retention_days': maxBackupRetentionDays,
       'enable_conflict_resolution': enableConflictResolution,
       'conflict_resolution_strategy': conflictResolutionStrategy,
+      'encrypt_backups': encryptBackups,
     };
   }
 
@@ -39,6 +42,7 @@ class SyncSettings {
       maxBackupRetentionDays: json['max_backup_retention_days'] as int? ?? 30,
       enableConflictResolution: json['enable_conflict_resolution'] as bool? ?? true,
       conflictResolutionStrategy: json['conflict_resolution_strategy'] as String? ?? 'last_write_wins',
+      encryptBackups: json['encrypt_backups'] as bool? ?? true,
     );
   }
 
@@ -53,6 +57,7 @@ class SyncSettings {
     int? maxBackupRetentionDays,
     bool? enableConflictResolution,
     String? conflictResolutionStrategy,
+    bool? encryptBackups,
   }) {
     return SyncSettings(
       autoBackupEnabled: autoBackupEnabled ?? this.autoBackupEnabled,
@@ -62,6 +67,7 @@ class SyncSettings {
       maxBackupRetentionDays: maxBackupRetentionDays ?? this.maxBackupRetentionDays,
       enableConflictResolution: enableConflictResolution ?? this.enableConflictResolution,
       conflictResolutionStrategy: conflictResolutionStrategy ?? this.conflictResolutionStrategy,
+      encryptBackups: encryptBackups ?? this.encryptBackups,
     );
   }
 
@@ -75,7 +81,8 @@ class SyncSettings {
         other.showSyncNotifications == showSyncNotifications &&
         other.maxBackupRetentionDays == maxBackupRetentionDays &&
         other.enableConflictResolution == enableConflictResolution &&
-        other.conflictResolutionStrategy == conflictResolutionStrategy;
+        other.conflictResolutionStrategy == conflictResolutionStrategy &&
+        other.encryptBackups == encryptBackups;
   }
 
   @override
@@ -88,6 +95,7 @@ class SyncSettings {
       maxBackupRetentionDays,
       enableConflictResolution,
       conflictResolutionStrategy,
+      encryptBackups,
     );
   }
 }

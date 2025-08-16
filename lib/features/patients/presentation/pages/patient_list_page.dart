@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../core/services/service_locator.dart';
 import '../../../../core/data/models/data_models.dart';
@@ -27,8 +28,13 @@ class PatientListPage extends StatefulWidget {
 class _PatientListPageState extends State<PatientListPage> {
   late final SyncService _syncService;
   late final DataRepository _dataRepository;
+  // Holds the full dataset loaded from repository
+  List<Patient> _allPatients = [];
+  // Holds the list currently displayed (may be filtered)
   List<Patient> _patients = [];
+  Map<String, double> _dueByPatient = {};
   bool _isLoading = false;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -53,7 +59,28 @@ class _PatientListPageState extends State<PatientListPage> {
     });
 
     try {
-      _patients = await _dataRepository.getPatients();
+      _allPatients = await _dataRepository.getPatients();
+      _patients = List<Patient>.from(_allPatients);
+      // compute due per patient
+      final dueMap = <String, double>{};
+      for (final p in _allPatients) {
+        final visits = await _dataRepository.getVisitsForPatient(p.id);
+        final payments = await _dataRepository.getPaymentsForPatient(p.id);
+        final paidByVisit = <String, double>{};
+        for (final pay in payments) {
+          if (pay.visitId == null) continue;
+          paidByVisit.update(pay.visitId!, (v) => v + pay.amount, ifAbsent: () => pay.amount);
+        }
+        double dueTotal = 0;
+        for (final v in visits) {
+          final total = (v.fee ?? 0);
+          final paid = (paidByVisit[v.id] ?? 0);
+          final due = (total - paid);
+          if (due > 0) dueTotal += due;
+        }
+        if (dueTotal > 0) dueMap[p.id] = dueTotal;
+      }
+      _dueByPatient = dueMap;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -123,15 +150,34 @@ class _PatientListPageState extends State<PatientListPage> {
       appBar: AppBar(
         title: const Text('Patients'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _navigateToSyncSettings,
-            tooltip: 'Settings',
-          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: 'Search patients',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onChanged: (q) {
+                final query = q.trim().toLowerCase();
+                setState(() {
+                  if (query.isEmpty) {
+                    _patients = List<Patient>.from(_allPatients);
+                  } else {
+                    _patients = _allPatients
+                        .where((p) => p.name.toLowerCase().contains(query) || p.phone.contains(q.trim()))
+                        .toList();
+                  }
+                });
+              },
+            ),
+          ),
           // All sync/offline UI moved to Settings per product decision.
           
           // Patient list
@@ -176,6 +222,7 @@ class _PatientListPageState extends State<PatientListPage> {
                               return PatientListItem(
                                 patient: patient,
                                 onTap: () => _navigateToPatientDetail(patient),
+                                dueAmount: _dueByPatient[patient.id],
                               );
                             },
                           ),
@@ -191,16 +238,19 @@ class _PatientListPageState extends State<PatientListPage> {
     );
   }
 
-  void _navigateToPatientDetail(Patient patient) {
-    Navigator.of(context).push(
+  Future<void> _navigateToPatientDetail(Patient patient) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => PatientDetailPage(patient: patient)),
     );
+    if (!mounted) return;
+    await _loadPatients();
   }
 
   Future<void> _showAddPatientDialog() async {
     final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
+    DateTime? dateOfBirth;
 
     await showDialog<void>(
       context: context,
@@ -210,21 +260,60 @@ class _PatientListPageState extends State<PatientListPage> {
           key: formKey,
           child: SizedBox(
             width: 380,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: nameController,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: phoneController,
-                  decoration: const InputDecoration(labelText: 'Phone'),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-              ],
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: phoneController,
+                    decoration: const InputDecoration(labelText: 'Phone (11 digits)'),
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(11),
+                    ],
+                    validator: (v) {
+                      final s = (v ?? '').trim();
+                      if (s.isEmpty) return 'Required';
+                      if (s.length != 11) return 'Must be 11 digits';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  InputDecorator(
+                    decoration: const InputDecoration(labelText: 'Date of Birth', border: OutlineInputBorder()),
+                    child: Row(
+                      children: [
+                        Expanded(child: Text(dateOfBirth != null ? '${dateOfBirth!.day}/${dateOfBirth!.month}/${dateOfBirth!.year}' : 'Pick a date')),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              firstDate: DateTime(1900),
+                              lastDate: DateTime(2100),
+                              initialDate: dateOfBirth ?? DateTime(2000, 1, 1),
+                            );
+                            if (picked != null) {
+                              dateOfBirth = picked;
+                              // ignore: invalid_use_of_protected_member
+                              (context as Element).markNeedsBuild();
+                            }
+                          },
+                          icon: const Icon(Icons.event),
+                          label: const Text('Pick date'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -236,10 +325,17 @@ class _PatientListPageState extends State<PatientListPage> {
           FilledButton(
             onPressed: () async {
               if (!formKey.currentState!.validate()) return;
+              if (dateOfBirth == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please select Date of Birth')),
+                );
+                return;
+              }
               final patient = Patient(
                 id: DateTime.now().millisecondsSinceEpoch.toString(),
                 name: nameController.text.trim(),
                 phone: phoneController.text.trim(),
+                dateOfBirth: dateOfBirth,
                 lastModified: DateTime.now(),
                 deviceId: 'this_device',
                 syncStatus: 'pending',

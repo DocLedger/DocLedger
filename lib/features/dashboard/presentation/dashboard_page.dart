@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../patients/presentation/pages/patient_list_page.dart';
-import '../reports/reports_page.dart';
 import '../../../core/auth/sign_out.dart';
 import '../../../core/services/service_locator.dart';
 import '../../../core/data/repositories/data_repository.dart';
@@ -30,7 +29,6 @@ class _DashboardPageState extends State<DashboardPage> {
     _pages = const [
       _HomeTab(),
       PatientListPage(),
-      ReportsPage(),
     ];
   }
 
@@ -47,7 +45,6 @@ class _DashboardPageState extends State<DashboardPage> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: 'Patients'),
-          NavigationDestination(icon: Icon(Icons.assessment_outlined), selectedIcon: Icon(Icons.assessment), label: 'Reports'),
         ],
         onDestinationSelected: (i) => setState(() => _index = i),
       ),
@@ -223,7 +220,7 @@ class _UpcomingList extends StatelessWidget {
               children: [
                 const Icon(Icons.schedule, size: 18),
                 const SizedBox(width: 8),
-                Expanded(child: Text(v.diagnosis ?? 'Visit')),
+                Expanded(child: Text(v.diagnosis ?? 'Visit', style: const TextStyle(fontSize: 15))),
                 Text(_date(v.followUpDate ?? v.visitDate)),
               ],
             );
@@ -256,8 +253,8 @@ class _RecentPatientsList extends StatelessWidget {
               children: [
                 const CircleAvatar(radius: 12, child: Icon(Icons.person, size: 14)),
                 const SizedBox(width: 8),
-                Expanded(child: Text(p.name)),
-                Text(p.phone),
+                Expanded(child: Text(p.name, style: const TextStyle(fontSize: 15))),
+                Text(p.phone, style: const TextStyle(fontSize: 15)),
               ],
             );
           },
@@ -339,7 +336,7 @@ class _DashboardCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.6)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.03),
@@ -406,7 +403,7 @@ class _MetricTile extends StatelessWidget {
             color: color.primary.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(icon, color: color.primary),
+          child: Center(child: Icon(icon, color: color.primary)),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -416,15 +413,14 @@ class _MetricTile extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(color: Colors.grey, fontSize: 14),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
+                style: const TextStyle(color: Colors.grey, fontSize: 15),
+                maxLines: 2,
+                softWrap: true,
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
                 value,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,

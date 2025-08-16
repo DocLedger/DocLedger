@@ -42,6 +42,7 @@ class SyncService {
   
   // Sync-enabled tables
   static const List<String> _syncTables = ['patients', 'visits', 'payments'];
+  bool _encryptBackups = true; // default on; toggled via settings
   
   SyncService({
     required DatabaseService database,
@@ -64,6 +65,11 @@ class SyncService {
   /// Dispose resources
   void dispose() {
     _stateController.close();
+  }
+
+  // Settings integration
+  void setEncryptBackups(bool value) {
+    _encryptBackups = value;
   }
 
   /// Resolves conflicts using the specified strategy
@@ -434,7 +440,7 @@ class SyncService {
   /// 
   /// This method:
   /// 1. Exports complete database snapshot
-  /// 2. Encrypts the data using clinic-specific encryption
+  /// 2. Encrypts the data using clinic-specific encryption (AES-GCM)
   /// 3. Uploads encrypted backup to Google Drive
   /// 4. Manages backup file retention policy
   /// 
@@ -477,15 +483,19 @@ class SyncService {
         },
       );
       
-      // Step 3: Encrypt backup data
+      // Step 3: Prepare payload (encrypt if enabled)
       _updateState(SyncState.backingUp(
         progress: 0.4,
-        currentOperation: 'Encrypting backup',
+        currentOperation: _encryptBackups ? 'Encrypting backup' : 'Preparing backup',
       ));
-      
-      final encryptionKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
-      final encryptedData = await _encryption.encryptData(backupData.toJson(), encryptionKey);
-      final payloadBytes = utf8.encode(jsonEncode(encryptedData.toJson()));
+      List<int> payloadBytes;
+      if (_encryptBackups) {
+        final encryptionKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
+        final encryptedData = await _encryption.encryptData(backupData.toJson(), encryptionKey);
+        payloadBytes = utf8.encode(jsonEncode(encryptedData.toJson()));
+      } else {
+        payloadBytes = utf8.encode(jsonEncode(backupData.toJson()));
+      }
       
       // Step 4: Upload to Google Drive
       _updateState(SyncState.backingUp(
@@ -594,18 +604,15 @@ class SyncService {
         },
       );
       
-      // Step 2: Decrypt backup data
+      // Step 2: Decode backup data (decrypt if needed)
       _updateState(SyncState.restoring(
         progress: 0.4,
-        currentOperation: 'Decrypting backup',
+        currentOperation: _encryptBackups ? 'Decrypting backup' : 'Parsing backup',
       ));
-      
-      // Downloaded file contains JSON-serialized EncryptedData
-      final encryptionKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
-      final Map<String, dynamic> jsonMap = jsonDecode(utf8.decode(encryptedBytes)) as Map<String, dynamic>;
-      final encryptedData = EncryptedData.fromJson(jsonMap);
-      
-      final decryptedData = await _encryption.decryptData(encryptedData, encryptionKey);
+      final Map<String, dynamic> parsed = jsonDecode(utf8.decode(encryptedBytes)) as Map<String, dynamic>;
+      final Map<String, dynamic> decryptedData = _encryptBackups
+          ? await _encryption.decryptData(EncryptedData.fromJson(parsed), await _encryption.deriveEncryptionKey(_clinicId, _deviceId))
+          : parsed;
       
       // Step 3: Parse and validate backup data
       _updateState(SyncState.restoring(
@@ -680,6 +687,19 @@ class SyncService {
     }
   }
 
+  /// Restores from the most recent backup if available
+  Future<SyncResult> restoreLatestBackup() async {
+    try {
+      final latest = await _driveService.getLatestBackup();
+      if (latest == null) {
+        return SyncResult.failure('No backups found');
+      }
+      return await restoreFromBackup(latest.id);
+    } catch (e) {
+      return SyncResult.failure('Restore latest failed: ${e.toString()}');
+    }
+  }
+
   // Private helper methods
 
   /// Updates the current sync state and notifies listeners
@@ -704,12 +724,10 @@ class SyncService {
           metadata: {'sync_type': 'incremental', 'table': tableName},
         );
         
-        // Encrypt and upload
-        final encryptionKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
-        final encryptedData = await _encryption.encryptData(backupData.toJson(), encryptionKey);
-        
         final fileName = _generateSyncFileName(tableName);
-        final payloadBytes = utf8.encode(jsonEncode(encryptedData.toJson()));
+        final List<int> payloadBytes = _encryptBackups
+            ? utf8.encode(jsonEncode((await _encryption.encryptData(backupData.toJson(), await _encryption.deriveEncryptionKey(_clinicId, _deviceId))).toJson()))
+            : utf8.encode(jsonEncode(backupData.toJson()));
         await _driveService.uploadBackupFile(fileName, payloadBytes);
         
         // Mark records as synced
@@ -746,12 +764,10 @@ class SyncService {
           },
         );
         
-        // Encrypt and upload
-        final encryptionKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
-        final encryptedData = await _encryption.encryptData(backupData.toJson(), encryptionKey);
-        
         final fileName = _generateSyncFileName(tableName);
-        final payloadBytes = utf8.encode(jsonEncode(encryptedData.toJson()));
+        final List<int> payloadBytes = _encryptBackups
+            ? utf8.encode(jsonEncode((await _encryption.encryptData(backupData.toJson(), await _encryption.deriveEncryptionKey(_clinicId, _deviceId))).toJson()))
+            : utf8.encode(jsonEncode(backupData.toJson()));
         await _driveService.uploadBackupFile(fileName, payloadBytes);
         
         // Mark records as synced
@@ -774,15 +790,12 @@ class SyncService {
     final latestBackup = await _driveService.getLatestBackup();
     
     if (latestBackup != null) {
-      // Download and decrypt backup
       final encryptedBytes = await _driveService.downloadBackupFile(latestBackup.id);
       final Map<String, dynamic> jsonMap = jsonDecode(utf8.decode(encryptedBytes)) as Map<String, dynamic>;
-      final encryptedData = EncryptedData.fromJson(jsonMap);
-      
-      final encryptionKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
-      final decryptedData = await _encryption.decryptData(encryptedData, encryptionKey);
-      
-      final backupData = BackupData.fromJson(decryptedData);
+      final Map<String, dynamic> dataMap = _encryptBackups
+          ? await _encryption.decryptData(EncryptedData.fromJson(jsonMap), await _encryption.deriveEncryptionKey(_clinicId, _deviceId))
+          : jsonMap;
+      final backupData = BackupData.fromJson(dataMap);
       
       // Apply changes for each table
       for (final entry in backupData.tables.entries) {
@@ -901,13 +914,15 @@ class SyncService {
   /// Generates a backup file name with timestamp
   String _generateBackupFileName() {
     final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-');
-    return 'docledger_backup_${_clinicId}_$timestamp.enc';
+    final ext = _encryptBackups ? 'enc' : 'json';
+    return 'docledger_backup_${_clinicId}_$timestamp.$ext';
   }
 
   /// Generates a sync file name for incremental updates
   String _generateSyncFileName(String tableName) {
     final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-');
-    return 'docledger_sync_${_clinicId}_${tableName}_$timestamp.enc';
+    final ext = _encryptBackups ? 'enc' : 'json';
+    return 'docledger_sync_${_clinicId}_${tableName}_$timestamp.$ext';
   }
 
   /// Resolves a single conflict using the specified strategy

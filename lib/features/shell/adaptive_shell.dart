@@ -5,7 +5,6 @@ import 'desktop_shell.dart';
 import '../dashboard/presentation/dashboard_page.dart';
 import '../sync/presentation/pages/sync_settings_page.dart';
 import '../patients/presentation/pages/patient_list_page.dart';
-import '../dashboard/reports/reports_page.dart';
 
 /// Picks the right shell for the current form factor.
 /// - Desktop/tablet wide screens: `DesktopShell`
@@ -45,21 +44,33 @@ class _MobileRootShellState extends State<_MobileRootShell> {
   static const List<Widget> _pages = <Widget>[
     DashboardPage(embedded: true),
     PatientListPage(),
-    ReportsPage(),
     SyncSettingsPage(),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('DocLedger')),
+      appBar: AppBar(
+        centerTitle: true,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset(
+              '/home/rashid/Desktop/doc_ledger_logo.png',
+              height: 24,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+            const SizedBox(width: 8),
+            const Text('DocLedger', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 22)),
+          ],
+        ),
+      ),
       body: _pages[_index],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: 'Patients'),
-          NavigationDestination(icon: Icon(Icons.assessment_outlined), selectedIcon: Icon(Icons.assessment), label: 'Reports'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
         onDestinationSelected: (i) => setState(() => _index = i),

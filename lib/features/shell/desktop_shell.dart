@@ -3,9 +3,9 @@ import 'package:flutter/services.dart';
 
 import '../dashboard/presentation/dashboard_page.dart' show DashboardPage; // reuse Home content
 import '../patients/presentation/pages/patient_list_page.dart';
-import '../dashboard/reports/reports_page.dart';
 import '../sync/presentation/pages/sync_settings_page.dart';
-import '../../core/auth/sign_out.dart';
+import '../../core/cloud/services/google_drive_service.dart';
+import '../../core/services/service_locator.dart';
 
 class DesktopShell extends StatefulWidget {
   static const String routeName = '/';
@@ -21,7 +21,6 @@ class _DesktopShellState extends State<DesktopShell> {
   late final List<Widget> _pages = const [
     DashboardPage(embedded: true),
     PatientListPage(),
-    ReportsPage(),
     SyncSettingsPage(),
   ];
 
@@ -40,7 +39,7 @@ class _DesktopShellState extends State<DesktopShell> {
             return null;
           }),
           _GoSettingsIntent: CallbackAction<_GoSettingsIntent>(onInvoke: (i) {
-            setState(() => _index = 3);
+            setState(() => _index = 2);
             return null;
           }),
         },
@@ -77,25 +76,15 @@ class _DesktopShellState extends State<DesktopShell> {
                       selected: _index == 1,
                       onTap: () => setState(() => _index = 1),
                     ),
-                    _NavItem(
-                      icon: Icons.description,
-                      label: 'Reports',
-                      selected: _index == 2,
-                      onTap: () => setState(() => _index = 2),
-                    ),
+                    
                     _NavItem(
                       icon: Icons.settings,
                       label: 'Settings',
-                      selected: _index == 3,
-                      onTap: () => setState(() => _index = 3),
+                      selected: _index == 2,
+                      onTap: () => setState(() => _index = 2),
                     ),
                     const Spacer(),
-                    _NavItem(
-                      icon: Icons.logout,
-                      label: 'Sign out',
-                      selected: false,
-                      onTap: () => performSignOut(context),
-                    ),
+                    _ProfileTile(),
                     const SizedBox(height: 16),
                   ],
                 ),
@@ -103,37 +92,12 @@ class _DesktopShellState extends State<DesktopShell> {
               Expanded(
                 child: Column(
                   children: [
-                    // Top bar with search and user avatar
+                    // Top bar – only show a right spacer now (search moved to patients page)
                     Container(
                       height: 64,
                       color: Theme.of(context).scaffoldBackgroundColor,
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 520),
-                            child: TextField(
-                              decoration: InputDecoration(
-                                prefixIcon: const Icon(Icons.search),
-                                hintText: 'Search patient name or ID',
-                                filled: true,
-                                fillColor: Colors.white,
-                                contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(28),
-                                  borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(28),
-                                  borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          const CircleAvatar(child: Icon(Icons.person)),
-                        ],
-                      ),
+                      child: const SizedBox.shrink(),
                     ),
                     Expanded(
                       child: Center(
@@ -192,6 +156,44 @@ class _NavItem extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+
+class _ProfileTile extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final drive = serviceLocator.get<GoogleDriveService>();
+    final email = drive.currentAccount?.email;
+    final name = drive.currentAccount?.displayName;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Container(
+        height: 52,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            const CircleAvatar(child: Icon(Icons.account_circle)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name ?? 'Clinic Profile', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  if (email != null)
+                    Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

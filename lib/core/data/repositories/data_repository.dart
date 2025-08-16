@@ -97,6 +97,16 @@ class DataRepository {
       throw DataRepositoryException('Failed to update visit: $e');
     }
   }
+  
+  /// Deletes a visit and triggers sync
+  Future<void> deleteVisit(String visitId) async {
+    try {
+      await _database.deleteVisit(visitId);
+      _triggerSync();
+    } catch (e) {
+      throw DataRepositoryException('Failed to delete visit: $e');
+    }
+  }
 
   // Payment operations
 

@@ -494,8 +494,8 @@ class GoogleDriveService {
     try {
       await _ensureBackupFolder();
 
-      // Query for backup files in the backup folder
-      final query = "'$_backupFolderId' in parents and trashed=false";
+      // Query for backup files in the backup folder (DocLedger patterns only)
+      final query = "'$_backupFolderId' in parents and trashed=false and (name contains 'docledger_backup_' or name contains 'docledger_sync_')";
       final fileList = await _driveApi!.files.list(
         q: query,
         orderBy: 'createdTime desc',

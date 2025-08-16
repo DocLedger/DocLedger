@@ -4,14 +4,12 @@ import 'dart:io' show Platform;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'core/services/service_locator.dart';
-import 'features/auth/presentation/login_page.dart';
 import 'features/sync/presentation/pages/sync_settings_page.dart';
 import 'features/patients/presentation/pages/patient_list_page.dart';
 import 'features/dashboard/presentation/dashboard_page.dart';
 import 'theme/app_theme.dart';
 import 'features/patients/presentation/pages/patient_detail_page.dart';
 import 'features/visits/presentation/visit_form_page.dart';
-import 'features/dashboard/reports/reports_page.dart';
 import 'features/shell/adaptive_shell.dart';
 
 void main() async {
@@ -43,11 +41,9 @@ class DocLedgerApp extends StatelessWidget {
       theme: AppTheme.light(),
       home: const AdaptiveShell(),
       routes: {
-        LoginPage.routeName: (_) => const LoginPage(),
         SyncSettingsPage.routeName: (_) => const SyncSettingsPage(),
         PatientListPage.routeName: (_) => const PatientListPage(),
         DashboardPage.routeName: (_) => const DashboardPage(),
-        ReportsPage.routeName: (_) => const ReportsPage(),
         // For pages with arguments, use onGenerateRoute when needed.
       },
       onGenerateRoute: (settings) {
