@@ -146,10 +146,20 @@ class _PatientListPageState extends State<PatientListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isWide = MediaQuery.sizeOf(context).width >= 900;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Patients'),
         actions: [
+          if (isWide)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: FilledButton.icon(
+                onPressed: _addPatient,
+                icon: const Icon(Icons.add),
+                label: const Text('Add Patient'),
+              ),
+            ),
           const SizedBox(width: 8),
         ],
       ),
@@ -230,11 +240,13 @@ class _PatientListPageState extends State<PatientListPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addPatient,
-        tooltip: 'Add Patient',
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: isWide
+          ? null
+          : FloatingActionButton(
+              onPressed: _addPatient,
+              tooltip: 'Add Patient',
+              child: const Icon(Icons.add),
+            ),
     );
   }
 

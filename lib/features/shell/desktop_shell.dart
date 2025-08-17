@@ -26,6 +26,9 @@ class _DesktopShellState extends State<DesktopShell> {
 
   @override
   Widget build(BuildContext context) {
+    // Make the sidebar width adaptive so it scales better on very wide screens
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final double sidebarWidth = (screenWidth * 0.18).clamp(240.0, 360.0) as double;
     return Shortcuts(
       shortcuts: <LogicalKeySet, Intent>{
         LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyN): const _GoPatientsAndAddIntent(),
@@ -46,9 +49,9 @@ class _DesktopShellState extends State<DesktopShell> {
         child: Scaffold(
           body: Row(
             children: [
-              // Custom sidebar ~240px width to match the reference
+              // Adaptive sidebar width: 18% of screen, clamped to 240-360px
               Container(
-                width: 240,
+                width: sidebarWidth,
                 color: Theme.of(context).colorScheme.surface,
                 child: Column(
                   children: [
@@ -57,9 +60,9 @@ class _DesktopShellState extends State<DesktopShell> {
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
                         children: [
-                          const CircleAvatar(radius: 14, child: Icon(Icons.local_hospital, size: 16)),
-                          const SizedBox(width: 8),
-                          Text('DocLedger', style: Theme.of(context).textTheme.titleLarge),
+                          Image.asset('assets/images/doc_ledger_logo.png', height: 36, errorBuilder: (_, __, ___) => const SizedBox(width: 36, height: 36)),
+                          const SizedBox(width: 12),
+                          Text('DocLedger', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900, fontSize: 24)),
                         ],
                       ),
                     ),
@@ -100,7 +103,8 @@ class _DesktopShellState extends State<DesktopShell> {
                       child: const SizedBox.shrink(),
                     ),
                     Expanded(
-                      child: Center(
+                      child: Align(
+                        alignment: Alignment.topCenter,
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 1200),
                           child: _pages[_index],

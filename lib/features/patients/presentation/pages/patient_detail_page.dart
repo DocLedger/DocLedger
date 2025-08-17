@@ -53,17 +53,20 @@ class _PatientDetailPageState extends State<PatientDetailPage> {
   @override
   Widget build(BuildContext context) {
     final totals = _computeTotals();
+    final bool isWide = MediaQuery.sizeOf(context).width >= 900;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Patient details'),
         actions: [
-          IconButton(onPressed: _editPatient, icon: const Icon(Icons.edit)),
-          IconButton(onPressed: _printPatientSummary, icon: const Icon(Icons.print)),
-          IconButton(
-            tooltip: 'Delete patient',
-            onPressed: _confirmDeletePatient,
-            icon: const Icon(Icons.delete_outline),
-          ),
+          if (!isWide) ...[
+            IconButton(onPressed: _editPatient, icon: const Icon(Icons.edit)),
+            IconButton(onPressed: _printPatientSummary, icon: const Icon(Icons.print)),
+            IconButton(
+              tooltip: 'Delete patient',
+              onPressed: _confirmDeletePatient,
+              icon: const Icon(Icons.delete_outline),
+            ),
+          ],
         ],
       ),
       body: Center(
@@ -74,17 +77,31 @@ class _PatientDetailPageState extends State<PatientDetailPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _patient.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 6),
                 Row(
                   children: [
+                    Expanded(
+                      child: Text(
+                        _patient.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    if (isWide) ...[
+                      _ActionIcon(icon: Icons.edit, tooltip: 'Edit', onPressed: _editPatient),
+                      const SizedBox(width: 8),
+                      _ActionIcon(icon: Icons.print, tooltip: 'Print', onPressed: _printPatientSummary),
+                      const SizedBox(width: 8),
+                      _ActionIcon(icon: Icons.delete_outline, tooltip: 'Delete', onPressed: _confirmDeletePatient),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
                     _InfoPill(icon: Icons.phone, label: 'Phone', value: _patient.phone),
-                    const SizedBox(width: 12),
                     _InfoPill(
                       icon: Icons.cake,
                       label: 'DOB',
@@ -619,7 +636,7 @@ extension on _PatientDetailPageState {
                       decoration: const InputDecoration(labelText: 'Follow-up', border: OutlineInputBorder()),
                       child: Row(
                         children: [
-                          Expanded(child: Text(followUp != null ? _formatDate(followUp!) : 'No date')),
+                          Expanded(child: Text(followUp != null ? _formatDate(followUp!) : 'Pick a date')),
                           TextButton.icon(
                             onPressed: () async {
                               final picked = await showDatePicker(
@@ -702,7 +719,7 @@ extension on _PatientDetailPageState {
                       decoration: const InputDecoration(labelText: 'Follow-up', border: OutlineInputBorder()),
                       child: Row(
                         children: [
-                          Expanded(child: Text(followUp != null ? _formatDate(followUp!) : 'No date')),
+                          Expanded(child: Text(followUp != null ? _formatDate(followUp!) : 'Pick a date')),
                           TextButton.icon(
                             onPressed: () async {
                               final picked = await showDatePicker(

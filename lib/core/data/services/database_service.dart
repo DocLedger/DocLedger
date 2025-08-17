@@ -81,6 +81,11 @@ class SQLiteDatabaseService implements DatabaseService {
     _database = await openDatabase(
       path,
       version: DatabaseSchema.currentVersion,
+      onConfigure: (db) async {
+        // Ensure foreign key constraints are enforced so child rows are removed
+        // when a parent is deleted (e.g., visits/payments when a patient is deleted)
+        await db.execute('PRAGMA foreign_keys=ON');
+      },
       onCreate: DatabaseSchema.onCreate,
       onUpgrade: DatabaseSchema.onUpgrade,
     );
@@ -485,11 +490,13 @@ class SQLiteDatabaseService implements DatabaseService {
   
   @override
   Future<void> deletePatient(String patientId) async {
-    await database.delete(
-      'patients',
-      where: 'id = ?',
-      whereArgs: [patientId],
-    );
+    // Manually cascade delete to handle environments where PRAGMA foreign_keys
+    // may not be honored (defensive measure)
+    await database.transaction((txn) async {
+      await txn.delete('payments', where: 'patient_id = ?', whereArgs: [patientId]);
+      await txn.delete('visits', where: 'patient_id = ?', whereArgs: [patientId]);
+      await txn.delete('patients', where: 'id = ?', whereArgs: [patientId]);
+    });
     
     await _updatePendingChangesCount('patients');
   }

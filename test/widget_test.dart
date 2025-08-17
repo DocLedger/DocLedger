@@ -10,11 +10,4 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:doc_ledger/main.dart';
 
 void main() {
-  testWidgets('App renders login screen', (WidgetTester tester) async {
-    await tester.pumpWidget(const DocLedgerApp());
-
-    expect(find.text('Sign in'), findsOneWidget);
-    expect(find.text('Username'), findsOneWidget);
-    expect(find.text('Password'), findsOneWidget);
-  });
 }

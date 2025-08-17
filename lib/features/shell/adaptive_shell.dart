@@ -55,13 +55,9 @@ class _MobileRootShellState extends State<_MobileRootShell> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image.asset(
-              '/home/rashid/Desktop/doc_ledger_logo.png',
-              height: 24,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-            ),
-            const SizedBox(width: 8),
-            const Text('DocLedger', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 22)),
+            Image.asset('assets/images/doc_ledger_logo.png', height: 36),
+            const SizedBox(width: 12),
+            const Text('DocLedger', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 26)),
           ],
         ),
       ),

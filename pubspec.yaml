@@ -89,6 +89,22 @@ dev_dependencies:
   integration_test:
     sdk: flutter
 
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  image_path: assets/images/doc_ledger_logo.png
+  android: true
+  ios: true
+  macos:
+    generate: true
+  windows:
+    generate: true
+    icon_size: 256
+  linux:
+    generate: true
+  adaptive_icon_background: "#3DBDEC"
+  adaptive_icon_foreground: assets/images/doc_ledger_logo.png
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -104,7 +120,8 @@ flutter:
 ## For Android/Windows real builds, keep overrides disabled.
 
   # To add assets to your application, add an assets section, like this:
-  # assets:
+  assets:
+    - assets/images/doc_ledger_logo.png
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
 
