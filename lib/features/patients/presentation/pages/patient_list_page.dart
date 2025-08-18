@@ -3,12 +3,9 @@ import 'package:flutter/services.dart';
 
 import '../../../../core/services/service_locator.dart';
 import '../../../../core/data/models/data_models.dart';
-import '../../../../core/sync/models/sync_models.dart';
 import '../../../../core/data/repositories/data_repository.dart';
-import '../../../../core/sync/services/sync_service.dart';
-import '../../../sync/presentation/widgets/sync_status_widget.dart';
-import '../../../sync/presentation/widgets/offline_indicator_widget.dart';
-import '../../../sync/presentation/pages/sync_settings_page.dart';
+import '../../../../core/cloud/services/cloud_save_service.dart';
+import '../../../settings/presentation/pages/settings_page.dart';
 import '../widgets/patient_list_item.dart';
 import 'patient_detail_page.dart';
 
@@ -26,8 +23,9 @@ class PatientListPage extends StatefulWidget {
 }
 
 class _PatientListPageState extends State<PatientListPage> {
-  late final SyncService _syncService;
+  late final CloudSaveService _cloudSaveService;
   late final DataRepository _dataRepository;
+  
   // Holds the full dataset loaded from repository
   List<Patient> _allPatients = [];
   // Holds the list currently displayed (may be filtered)
@@ -39,15 +37,15 @@ class _PatientListPageState extends State<PatientListPage> {
   @override
   void initState() {
     super.initState();
-    _syncService = serviceLocator.get<SyncService>();
+    _cloudSaveService = serviceLocator.get<CloudSaveService>();
     _dataRepository = serviceLocator.get<DataRepository>();
     _loadPatients();
     
-    // Listen to sync state changes
-    _syncService.stateStream.listen((state) {
+    // Listen to cloud save state changes
+    _cloudSaveService.stateStream.listen((state) {
       if (mounted) {
         setState(() {
-          // Update UI based on sync state changes
+          // Update UI based on cloud save state changes
         });
       }
     });
@@ -100,44 +98,41 @@ class _PatientListPageState extends State<PatientListPage> {
   }
 
   Future<void> _onRefresh() async {
-    // Trigger manual sync
+    // Trigger manual cloud save
     try {
-      final result = await _syncService.performIncrementalSync();
-      
-      if (mounted) {
-        if (result.isSuccess) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Sync completed successfully'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Sync failed: ${result.errorMessage}'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
+      final result = await _cloudSaveService.saveNow();
+      if (!mounted) return;
+      if (result.isSuccess) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cloud save completed'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Sync error: $e'),
-            backgroundColor: Colors.red,
+            content: Text(result.errorMessage ?? 'Cloud save failed'),
+            backgroundColor: Colors.orange,
           ),
         );
       }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cloud save error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
-    
+
     // Reload patients after sync
     await _loadPatients();
   }
 
   void _navigateToSyncSettings() {
-    Navigator.of(context).pushNamed(SyncSettingsPage.routeName);
+    Navigator.of(context).pushNamed(SettingsPage.routeName);
   }
 
   void _addPatient() {
@@ -374,21 +369,5 @@ class _PatientListPageState extends State<PatientListPage> {
     );
   }
 
-  Future<int> _getConflictCount() async {
-    try {
-      final conflicts = await _syncService.getPendingConflicts();
-      return conflicts.length;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  void _resolveConflicts() {
-    // TODO: Navigate to conflict resolution page
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Conflict resolution will be implemented'),
-      ),
-    );
-  }
+  // Conflict resolution removed in simplified cloud save system
 }

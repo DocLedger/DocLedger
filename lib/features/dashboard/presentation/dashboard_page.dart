@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../patients/presentation/pages/patient_list_page.dart';
-import '../../../core/auth/sign_out.dart';
 import '../../../core/services/service_locator.dart';
 import '../../../core/data/repositories/data_repository.dart';
 import '../../../core/data/models/data_models.dart' as models;
@@ -102,7 +101,7 @@ class _HomeTab extends StatelessWidget {
               buildMetric('Total Patients (All Time)', patients.toString(), Icons.people),
               buildMetric("Today's Patient Visits ", todayVisits.toString(), Icons.event_available),
               buildMetric('This Month Revenue', 'Rs.${monthRevenue.toStringAsFixed(0)}', Icons.payments),
-              buildMetric('Follow-ups (7d)', pendingFollowUps.toString(), Icons.schedule),
+              buildMetric('Follow-ups (7 days)', pendingFollowUps.toString(), Icons.schedule),
             ];
             if (isCompact) {
               return GridView.builder(

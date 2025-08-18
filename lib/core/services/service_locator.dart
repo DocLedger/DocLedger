@@ -1,14 +1,12 @@
 import 'package:get_it/get_it.dart';
 import 'package:flutter/foundation.dart';
 
-import '../sync/models/sync_models.dart';
-import '../sync/services/sync_service.dart';
+import '../cloud/services/cloud_save_service.dart';
 import '../data/services/database_service.dart';
 import '../data/repositories/data_repository.dart';
 import '../cloud/services/google_drive_service.dart';
 import '../encryption/services/encryption_service.dart';
 import '../connectivity/services/connectivity_service.dart';
-import '../../features/sync/models/sync_settings.dart';
 
 /// Global service locator
 final GetIt serviceLocator = GetIt.instance;
@@ -16,11 +14,7 @@ final GetIt serviceLocator = GetIt.instance;
 /// Initializes all core services for the application (idempotent)
 Future<void> initializeServices() async {
   try {
-    if (serviceLocator.isRegistered<SyncService>()) return;
-
-    // Core settings
-    final syncSettings = SyncSettings.defaultSettings();
-    serviceLocator.registerSingleton<SyncSettings>(syncSettings);
+    if (serviceLocator.isRegistered<CloudSaveService>()) return;
 
     // Connectivity
     final connectivityService = AppConnectivityService();
@@ -52,15 +46,22 @@ Future<void> initializeServices() async {
     }
     serviceLocator.registerSingleton<GoogleDriveService>(driveService);
 
-    // Sync service
-    final syncService = SyncService(
+    // Cloud Save service (simplified unified service)
+    final cloudSaveService = CloudSaveService(
       database: database,
       driveService: driveService,
       encryption: encryptionService,
       clinicId: clinicId,
       deviceId: deviceId,
     );
-    serviceLocator.registerSingleton<SyncService>(syncService);
+    try {
+      await cloudSaveService.initialize();
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('CloudSaveService initialization failed: $e');
+      }
+    }
+    serviceLocator.registerSingleton<CloudSaveService>(cloudSaveService);
 
     // Repository
     final dataRepository = DataRepository();
@@ -84,8 +85,8 @@ Future<String> _getOrCreateClinicId(EncryptionService encryptionService) async {
 /// Dispose services (call on app exit)
 Future<void> disposeServices() async {
   try {
-    if (serviceLocator.isRegistered<SyncService>()) {
-      serviceLocator.get<SyncService>().dispose();
+    if (serviceLocator.isRegistered<CloudSaveService>()) {
+      serviceLocator.get<CloudSaveService>().dispose();
     }
     if (serviceLocator.isRegistered<AppConnectivityService>()) {
       serviceLocator.get<AppConnectivityService>().dispose();

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:workmanager/workmanager.dart';
-import '../../sync/services/sync_service.dart';
+import '../../cloud/services/cloud_save_service.dart';
 import '../../connectivity/services/connectivity_service.dart';
 
 /// Service responsible for managing background synchronization tasks
@@ -15,16 +15,16 @@ class BackgroundSyncService {
   static const Duration _periodicSyncInterval = Duration(minutes: 30);
   static const Duration _batteryOptimizedInterval = Duration(hours: 2);
   
-  final SyncService _syncService;
+  final CloudSaveService _cloudSaveService;
   final AppConnectivityService _connectivityService;
   
   bool _isInitialized = false;
   bool _batteryOptimizationEnabled = false;
   
   BackgroundSyncService({
-    required SyncService syncService,
+    required CloudSaveService cloudSaveService,
     required AppConnectivityService connectivityService,
-  }) : _syncService = syncService,
+  }) : _cloudSaveService = cloudSaveService,
        _connectivityService = connectivityService;
 
   /// Initialize the background sync service and register all background tasks

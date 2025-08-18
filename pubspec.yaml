@@ -40,6 +40,7 @@ dependencies:
   googleapis: ^13.2.0
   googleapis_auth: ^1.6.0
   http: ^1.2.0
+  url_launcher: ^6.3.0
   
   # Encryption and security
   crypto: ^3.0.3

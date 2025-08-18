@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'desktop_shell.dart';
 import '../dashboard/presentation/dashboard_page.dart';
-import '../sync/presentation/pages/sync_settings_page.dart';
+import '../settings/presentation/pages/settings_page.dart';
 import '../patients/presentation/pages/patient_list_page.dart';
 
 /// Picks the right shell for the current form factor.
@@ -44,7 +44,7 @@ class _MobileRootShellState extends State<_MobileRootShell> {
   static const List<Widget> _pages = <Widget>[
     DashboardPage(embedded: true),
     PatientListPage(),
-    SyncSettingsPage(),
+    SettingsPage(),
   ];
 
   @override

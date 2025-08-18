@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
-import '../../../../core/sync/models/sync_models.dart';
+import '../../../../core/cloud/models/cloud_save_models.dart';
 
-/// Widget that displays the current sync status with real-time updates
+/// Widget that displays the current cloud save status with real-time updates
 class SyncStatusWidget extends StatelessWidget {
-  final SyncState syncState;
-  final VoidCallback? onManualSync;
+  final CloudSaveState cloudSaveState;
+  final VoidCallback? onManualSave;
   final VoidCallback? onSettings;
   final bool showSettings;
   final bool compact;
 
   const SyncStatusWidget({
     super.key,
-    required this.syncState,
-    this.onManualSync,
+    required this.cloudSaveState,
+    this.onManualSave,
     this.onSettings,
     this.showSettings = true,
     this.compact = false,
@@ -48,10 +48,10 @@ class SyncStatusWidget extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (syncState.currentOperation != null) ...[
+                      if (cloudSaveState.currentOperation != null) ...[
                         const SizedBox(height: 4),
                         Text(
-                          syncState.currentOperation!,
+                          cloudSaveState.currentOperation!,
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
@@ -64,19 +64,19 @@ class SyncStatusWidget extends StatelessWidget {
                   IconButton(
                     icon: const Icon(Icons.settings),
                     onPressed: onSettings,
-                    tooltip: 'Sync Settings',
+                    tooltip: 'Cloud Save Settings',
                   ),
               ],
             ),
             const SizedBox(height: 12),
-            if (syncState.progress != null) ...[
+            if (cloudSaveState.progress != null) ...[
               LinearProgressIndicator(
-                value: syncState.progress,
+                value: cloudSaveState.progress,
                 backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
               ),
               const SizedBox(height: 8),
               Text(
-                '${(syncState.progress! * 100).toInt()}% complete',
+                '${(cloudSaveState.progress! * 100).toInt()}% complete',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 12),
@@ -89,49 +89,22 @@ class SyncStatusWidget extends StatelessWidget {
                     children: [
                       _buildInfoRow(
                         context,
-                        'Last Sync',
-                        _formatLastSyncTime(),
-                        Icons.sync,
+                        'Last Save',
+                        _formatLastSaveTime(),
+                        Icons.cloud_upload,
                       ),
-                      const SizedBox(height: 4),
-                      _buildInfoRow(
-                        context,
-                        'Last Backup',
-                        _formatLastBackupTime(),
-                        Icons.backup,
-                      ),
-                      if (syncState.pendingChanges > 0) ...[
-                        const SizedBox(height: 4),
-                        _buildInfoRow(
-                          context,
-                          'Pending Changes',
-                          '${syncState.pendingChanges}',
-                          Icons.pending_actions,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ],
-                      if (syncState.conflicts.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        _buildInfoRow(
-                          context,
-                          'Conflicts',
-                          '${syncState.conflicts.length}',
-                          Icons.warning,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ],
                     ],
                   ),
                 ),
-                if (_canTriggerManualSync())
+                if (_canTriggerManualSave())
                   ElevatedButton.icon(
-                    onPressed: onManualSync,
-                    icon: const Icon(Icons.sync, size: 18),
-                    label: const Text('Sync Now'),
+                    onPressed: onManualSave,
+                    icon: const Icon(Icons.cloud_upload, size: 18),
+                    label: const Text('Save Now'),
                   ),
               ],
             ),
-            if (syncState.errorMessage != null) ...[
+            if (cloudSaveState.errorMessage != null) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -149,7 +122,7 @@ class SyncStatusWidget extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        syncState.errorMessage!,
+                        cloudSaveState.errorMessage!,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Theme.of(context).colorScheme.onErrorContainer,
                         ),
@@ -183,23 +156,6 @@ class SyncStatusWidget extends StatelessWidget {
               fontWeight: FontWeight.w500,
             ),
           ),
-          if (syncState.pendingChanges > 0) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                '${syncState.pendingChanges}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onPrimary,
-                  fontSize: 10,
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -207,15 +163,14 @@ class SyncStatusWidget extends StatelessWidget {
 
   Widget _buildStatusIcon({double? size}) {
     final iconSize = size ?? 24.0;
-    
-    switch (syncState.status) {
-      case SyncStatus.idle:
+    switch (cloudSaveState.status) {
+      case CloudSaveStatus.idle:
         return Icon(
           Icons.cloud_done,
           color: Colors.green,
           size: iconSize,
         );
-      case SyncStatus.syncing:
+      case CloudSaveStatus.saving:
         return SizedBox(
           width: iconSize,
           height: iconSize,
@@ -223,16 +178,7 @@ class SyncStatusWidget extends StatelessWidget {
             strokeWidth: 2,
           ),
         );
-      case SyncStatus.backingUp:
-        return SizedBox(
-          width: iconSize,
-          height: iconSize,
-          child: const CircularProgressIndicator(
-            strokeWidth: 2,
-            color: Colors.blue,
-          ),
-        );
-      case SyncStatus.restoring:
+      case CloudSaveStatus.restoring:
         return SizedBox(
           width: iconSize,
           height: iconSize,
@@ -241,7 +187,7 @@ class SyncStatusWidget extends StatelessWidget {
             color: Colors.orange,
           ),
         );
-      case SyncStatus.error:
+      case CloudSaveStatus.error:
         return Icon(
           Icons.cloud_off,
           color: Colors.red,
@@ -283,82 +229,45 @@ class SyncStatusWidget extends StatelessWidget {
   }
 
   String _getStatusText() {
-    switch (syncState.status) {
-      case SyncStatus.idle:
-        if (syncState.pendingChanges > 0) {
-          return 'Ready to sync';
-        }
-        return 'Up to date';
-      case SyncStatus.syncing:
-        return 'Syncing...';
-      case SyncStatus.backingUp:
-        return 'Backing up...';
-      case SyncStatus.restoring:
+    switch (cloudSaveState.status) {
+      case CloudSaveStatus.idle:
+        return cloudSaveState.statusMessage;
+      case CloudSaveStatus.saving:
+        return 'Saving...';
+      case CloudSaveStatus.restoring:
         return 'Restoring...';
-      case SyncStatus.error:
-        return 'Sync error';
+      case CloudSaveStatus.error:
+        return 'Cloud save error';
     }
   }
 
   String _getCompactStatusText() {
-    switch (syncState.status) {
-      case SyncStatus.idle:
-        if (syncState.pendingChanges > 0) {
-          return 'Sync pending';
-        }
-        return 'Synced';
-      case SyncStatus.syncing:
-        return 'Syncing';
-      case SyncStatus.backingUp:
-        return 'Backing up';
-      case SyncStatus.restoring:
+    switch (cloudSaveState.status) {
+      case CloudSaveStatus.idle:
+        return cloudSaveState.statusMessage;
+      case CloudSaveStatus.saving:
+        return 'Saving';
+      case CloudSaveStatus.restoring:
         return 'Restoring';
-      case SyncStatus.error:
+      case CloudSaveStatus.error:
         return 'Error';
     }
   }
 
-  String _formatLastSyncTime() {
-    if (syncState.lastSyncTime == null) {
-      return 'Never';
-    }
-    
+  String _formatLastSaveTime() {
+    final t = cloudSaveState.lastSaveTime;
+    if (t == null) return 'Never';
     final now = DateTime.now();
-    final difference = now.difference(syncState.lastSyncTime!);
-    
-    if (difference.inMinutes < 1) {
-      return 'Just now';
-    } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    } else {
-      return '${difference.inDays}d ago';
-    }
+    final difference = now.difference(t);
+    if (difference.inMinutes < 1) return 'Just now';
+    if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
+    if (difference.inHours < 24) return '${difference.inHours}h ago';
+    return '${difference.inDays}d ago';
   }
 
-  String _formatLastBackupTime() {
-    if (syncState.lastBackupTime == null) {
-      return 'Never';
-    }
-    
-    final now = DateTime.now();
-    final difference = now.difference(syncState.lastBackupTime!);
-    
-    if (difference.inMinutes < 1) {
-      return 'Just now';
-    } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    } else {
-      return '${difference.inDays}d ago';
-    }
-  }
-
-  bool _canTriggerManualSync() {
-    return onManualSync != null && 
-           syncState.status == SyncStatus.idle &&
-           syncState.pendingChanges > 0;
+  bool _canTriggerManualSave() {
+    return onManualSave != null && cloudSaveState.status == CloudSaveStatus.idle;
   }
 }
+
+

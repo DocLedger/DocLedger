@@ -67,6 +67,41 @@ class GoogleDriveService {
   /// Whether the service is currently authenticated
   bool get isAuthenticated => _authState == AuthenticationState.authenticated;
 
+  bool _looksLikeAuthError(Object e) {
+    final msg = e.toString();
+    return msg.contains('status: 401') ||
+        msg.contains('invalid authentication credentials') ||
+        msg.contains('invalid_grant') ||
+        msg.contains('access token');
+  }
+
+  Future<void> _reauthenticateSilently() async {
+    // Try silent sign-in or token refresh
+    final account = await _googleSignIn.signInSilently();
+    if (account != null) {
+      await _completeAuthentication(account);
+      return;
+    }
+    if (_currentAccount != null) {
+      await _refreshTokens();
+      return;
+    }
+    _authState = AuthenticationState.notAuthenticated;
+    throw const GoogleDriveException('Authentication expired');
+  }
+
+  Future<T> _withAuthRetry<T>(Future<T> Function() action) async {
+    try {
+      return await action();
+    } catch (e) {
+      if (_looksLikeAuthError(e)) {
+        await _reauthenticateSilently();
+        return await action();
+      }
+      rethrow;
+    }
+  }
+
   /// Initialize the service and attempt to restore previous authentication
   Future<void> initialize() async {
     try {
@@ -301,23 +336,34 @@ class GoogleDriveService {
     }
     
     try {
-      // Search for existing backup folder
-      final query = "name='$_backupFolderName' and mimeType='application/vnd.google-apps.folder' and trashed=false";
-      final searchResult = await _driveApi!.files.list(q: query);
-      
-      if (searchResult.files != null && searchResult.files!.isNotEmpty) {
-        _backupFolderId = searchResult.files!.first.id;
-        return;
-      }
-      
-      // Create backup folder if it doesn't exist
-      final folder = drive.File()
-        ..name = _backupFolderName
-        ..mimeType = 'application/vnd.google-apps.folder';
-      
-      final createdFolder = await _driveApi!.files.create(folder);
-      _backupFolderId = createdFolder.id;
+      await _withAuthRetry(() async {
+        // Search for existing backup folder
+        final query = "name='$_backupFolderName' and mimeType='application/vnd.google-apps.folder' and trashed=false";
+        final searchResult = await _driveApi!.files.list(q: query);
+        
+        if (searchResult.files != null && searchResult.files!.isNotEmpty) {
+          _backupFolderId = searchResult.files!.first.id;
+          return;
+        }
+        
+        // Create backup folder if it doesn't exist
+        final folder = drive.File()
+          ..name = _backupFolderName
+          ..mimeType = 'application/vnd.google-apps.folder';
+        
+        final createdFolder = await _driveApi!.files.create(folder);
+        _backupFolderId = createdFolder.id;
+      });
     } catch (e) {
+      // Provide user-friendly error for no internet
+      final msg = e.toString();
+      if (e is SocketException || msg.contains('Failed host lookup') || msg.contains('No address associated')) {
+        throw GoogleDriveException(
+          'No internet connection. Please check your network and try again.',
+          code: 'NETWORK_UNAVAILABLE',
+          originalException: e is Exception ? e : Exception(e.toString()),
+        );
+      }
       throw GoogleDriveException(
         'Failed to ensure backup folder exists: ${e.toString()}',
         originalException: e is Exception ? e : Exception(e.toString()),
@@ -422,10 +468,12 @@ class GoogleDriveService {
       );
 
       // Upload file with progress tracking
-      final uploadedFile = await _driveApi!.files.create(
-        fileMetadata,
-        uploadMedia: media,
-      );
+      final uploadedFile = await _withAuthRetry(() async {
+        return await _driveApi!.files.create(
+          fileMetadata,
+          uploadMedia: media,
+        );
+      });
 
       if (uploadedFile.id == null) {
         throw GoogleDriveException('Failed to upload file: No file ID returned');
@@ -437,6 +485,14 @@ class GoogleDriveService {
       return uploadedFile.id!;
     } catch (e) {
       if (e is GoogleDriveException) rethrow;
+      final msg = e.toString();
+      if (e is SocketException || msg.contains('Failed host lookup') || msg.contains('No address associated')) {
+        throw GoogleDriveException(
+          'No internet connection. Please check your network and try again.',
+          code: 'NETWORK_UNAVAILABLE',
+          originalException: e is Exception ? e : Exception(e.toString()),
+        );
+      }
       throw GoogleDriveException(
         'Failed to upload backup file: ${e.toString()}',
         originalException: e is Exception ? e : Exception(e.toString()),
@@ -455,14 +511,18 @@ class GoogleDriveService {
 
     try {
       // Get file metadata first to check size
-      final fileMetadata = await _driveApi!.files.get(fileId) as drive.File;
+      final fileMetadata = await _withAuthRetry(() async {
+        return await _driveApi!.files.get(fileId) as drive.File;
+      });
       final fileSize = fileMetadata.size != null ? int.parse(fileMetadata.size!) : 0;
 
       // Download file content
-      final media = await _driveApi!.files.get(
-        fileId,
-        downloadOptions: drive.DownloadOptions.fullMedia,
-      ) as drive.Media;
+      final media = await _withAuthRetry(() async {
+        return await _driveApi!.files.get(
+          fileId,
+          downloadOptions: drive.DownloadOptions.fullMedia,
+        ) as drive.Media;
+      });
 
       final List<int> bytes = [];
       int totalBytesRead = 0;
@@ -478,6 +538,14 @@ class GoogleDriveService {
       return bytes;
     } catch (e) {
       if (e is GoogleDriveException) rethrow;
+      final msg = e.toString();
+      if (e is SocketException || msg.contains('Failed host lookup') || msg.contains('No address associated')) {
+        throw GoogleDriveException(
+          'No internet connection. Please check your network and try again.',
+          code: 'NETWORK_UNAVAILABLE',
+          originalException: e is Exception ? e : Exception(e.toString()),
+        );
+      }
       throw GoogleDriveException(
         'Failed to download backup file: ${e.toString()}',
         originalException: e is Exception ? e : Exception(e.toString()),
@@ -494,13 +562,16 @@ class GoogleDriveService {
     try {
       await _ensureBackupFolder();
 
-      // Query for backup files in the backup folder (DocLedger patterns only)
-      final query = "'$_backupFolderId' in parents and trashed=false and (name contains 'docledger_backup_' or name contains 'docledger_sync_')";
-      final fileList = await _driveApi!.files.list(
-        q: query,
-        orderBy: 'createdTime desc',
-        $fields: 'files(id,name,size,createdTime,modifiedTime,description)',
-      );
+      // Query for backup files in the backup folder. Do not filter by name to avoid
+      // missing files if naming changes (e.g. docledger_save_* vs docledger_backup_*).
+      final query = "'$_backupFolderId' in parents and trashed=false";
+      final fileList = await _withAuthRetry(() async {
+        return await _driveApi!.files.list(
+          q: query,
+          orderBy: 'createdTime desc',
+          $fields: 'files(id,name,size,createdTime,modifiedTime,description)',
+        );
+      });
 
       final backupFiles = <BackupFileInfo>[];
       
@@ -522,6 +593,14 @@ class GoogleDriveService {
       return backupFiles;
     } catch (e) {
       if (e is GoogleDriveException) rethrow;
+      final msg = e.toString();
+      if (e is SocketException || msg.contains('Failed host lookup') || msg.contains('No address associated')) {
+        throw GoogleDriveException(
+          'No internet connection. Please check your network and try again.',
+          code: 'NETWORK_UNAVAILABLE',
+          originalException: e is Exception ? e : Exception(e.toString()),
+        );
+      }
       throw GoogleDriveException(
         'Failed to list backup files: ${e.toString()}',
         originalException: e is Exception ? e : Exception(e.toString()),

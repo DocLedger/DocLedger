@@ -1,6 +1,6 @@
 import '../models/data_models.dart';
 import '../services/database_service.dart';
-import '../../sync/services/sync_service.dart';
+import '../../cloud/services/cloud_save_service.dart';
 import '../../services/service_locator.dart';
 
 /// Repository for managing patient, visit, and payment data with sync integration
@@ -9,13 +9,13 @@ import '../../services/service_locator.dart';
 /// automatically triggering sync operations when data is modified.
 class DataRepository {
   final DatabaseService _database;
-  final SyncService _syncService;
+  final CloudSaveService _cloudSaveService;
 
   DataRepository({
     DatabaseService? database,
-    SyncService? syncService,
+    CloudSaveService? cloudSaveService,
   }) : _database = database ?? serviceLocator.get<DatabaseService>(),
-       _syncService = syncService ?? serviceLocator.get<SyncService>();
+       _cloudSaveService = cloudSaveService ?? serviceLocator.get<CloudSaveService>();
 
   // Patient operations
 
@@ -148,21 +148,12 @@ class DataRepository {
     }
   }
 
-  /// Gets all records with sync conflicts
-  Future<List<SyncConflict>> getSyncConflicts() async {
-    try {
-      return await _syncService.getPendingConflicts();
-    } catch (e) {
-      return [];
-    }
-  }
-
   /// Triggers background sync (non-blocking)
   void _triggerSync() {
     // Schedule sync in the background without blocking the UI
     Future.microtask(() async {
       try {
-        await _syncService.performIncrementalSync();
+        await _cloudSaveService.saveNow();
       } catch (e) {
         // Log error but don't throw - sync failures shouldn't break data operations
         print('Background sync failed: $e');

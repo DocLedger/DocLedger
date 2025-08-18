@@ -97,37 +97,14 @@ class DatabaseSchema {
     ALTER TABLE payments ADD COLUMN device_id TEXT DEFAULT ''
   ''';
 
-  /// Sync metadata table for tracking sync state per table
-  static const String createSyncMetadataTable = '''
-    CREATE TABLE sync_metadata (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      table_name TEXT NOT NULL UNIQUE,
-      last_sync_timestamp INTEGER DEFAULT 0,
-      last_backup_timestamp INTEGER DEFAULT 0,
-      pending_changes_count INTEGER DEFAULT 0,
-      conflict_count INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  ''';
+  // Simplified - no complex sync metadata table needed
 
-  /// Sync conflicts table for storing unresolved conflicts
-  static const String createSyncConflictsTable = '''
-    CREATE TABLE sync_conflicts (
-      id TEXT PRIMARY KEY,
-      table_name TEXT NOT NULL,
-      record_id TEXT NOT NULL,
-      local_data TEXT NOT NULL,
-      remote_data TEXT NOT NULL,
-      conflict_timestamp INTEGER NOT NULL,
-      conflict_type TEXT NOT NULL,
-      resolution_status TEXT DEFAULT 'pending',
-      resolved_data TEXT,
-      resolution_timestamp INTEGER,
-      resolution_strategy TEXT,
-      notes TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+  /// Settings table for storing application settings
+  static const String createSettingsTable = '''
+    CREATE TABLE settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     )
   ''';
 
@@ -148,10 +125,10 @@ class DatabaseSchema {
     'CREATE INDEX idx_payments_device_id ON payments (device_id)',
     'CREATE INDEX idx_payments_patient_id ON payments (patient_id)',
     
-    // Indexes for conflict resolution
-    'CREATE INDEX idx_sync_conflicts_table_record ON sync_conflicts (table_name, record_id)',
-    'CREATE INDEX idx_sync_conflicts_status ON sync_conflicts (resolution_status)',
-    'CREATE INDEX idx_sync_conflicts_timestamp ON sync_conflicts (conflict_timestamp)',
+    // Indexes for conflict resolution (table may not exist in simplified model)
+    'CREATE INDEX IF NOT EXISTS idx_sync_conflicts_table_record ON sync_conflicts (table_name, record_id)',
+    'CREATE INDEX IF NOT EXISTS idx_sync_conflicts_status ON sync_conflicts (resolution_status)',
+    'CREATE INDEX IF NOT EXISTS idx_sync_conflicts_timestamp ON sync_conflicts (conflict_timestamp)',
     
     // Composite indexes for common sync queries
     'CREATE INDEX idx_patients_sync_modified ON patients (sync_status, last_modified)',
@@ -174,6 +151,25 @@ class DatabaseSchema {
          VALUES ('payments', $now, $now)''',
     ];
   }
+
+  /// Legacy sync tables for compatibility in simplified model
+  static const String createSyncMetadataTable = '''
+    CREATE TABLE IF NOT EXISTS sync_metadata (
+      table_name TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  ''';
+
+  static const String createSyncConflictsTable = '''
+    CREATE TABLE IF NOT EXISTS sync_conflicts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_name TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      conflict_timestamp INTEGER NOT NULL,
+      resolution_status TEXT DEFAULT 'unresolved'
+    )
+  ''';
 
   /// Database migration handler
   static Future<void> onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -273,6 +269,7 @@ class DatabaseSchema {
   static Future<void> _migrateToVersion3(Database db) async {
     try { await db.execute(addPrescriptionsToVisits); } catch (_) {}
     try { await db.execute(addFollowUpDateToVisits); } catch (_) {}
+    try { await db.execute(createSettingsTable); } catch (_) {}
   }
 
   /// Database creation handler
@@ -281,6 +278,7 @@ class DatabaseSchema {
     await db.execute(createPatientsTable);
     await db.execute(createVisitsTable);
     await db.execute(createPaymentsTable);
+    await db.execute(createSettingsTable);
 
     // If creating at version 2 or higher, add sync features
     if (version >= 2) {

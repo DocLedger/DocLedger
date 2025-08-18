@@ -56,10 +56,13 @@ class EncryptionService {
       // Calculate checksum of original data
       final checksum = _calculateChecksum(plainBytes);
       
+      // encrypt package v5 does not expose MAC separately; store last 16 bytes as tag
+      final bytes = encrypted.bytes;
+      final tagStart = bytes.length >= 16 ? bytes.length - 16 : 0;
       return EncryptedData(
-        data: encrypted.bytes.toList(),
+        data: bytes.toList(),
         iv: iv.toList(),
-        tag: encrypted.bytes.sublist(encrypted.bytes.length - 16).toList(), // GCM tag is last 16 bytes
+        tag: bytes.sublist(tagStart).toList(),
         algorithm: _algorithm,
         checksum: checksum,
         timestamp: DateTime.now(),
@@ -102,10 +105,10 @@ class EncryptionService {
       final encrypter = Encrypter(AES(Key(key), mode: AESMode.gcm));
       final ivObj = IV(Uint8List.fromList(encryptedData.iv));
       
-      // Create encrypted object for decryption
+      // Create encrypted object for decryption (encrypt package expects full bytes)
       final encrypted = Encrypted(Uint8List.fromList(encryptedData.data));
       
-      // Decrypt the data
+      // Decrypt the data (GCM tag is embedded in bytes for this package API)
       final decryptedString = encrypter.decrypt(encrypted, iv: ivObj);
       final decryptedBytes = utf8.encode(decryptedString);
       

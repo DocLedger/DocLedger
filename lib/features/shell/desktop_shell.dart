@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 
 import '../dashboard/presentation/dashboard_page.dart' show DashboardPage; // reuse Home content
 import '../patients/presentation/pages/patient_list_page.dart';
-import '../sync/presentation/pages/sync_settings_page.dart';
+import '../settings/presentation/pages/settings_page.dart';
 import '../../core/cloud/services/google_drive_service.dart';
+import 'package:url_launcher/url_launcher.dart';
+// Cloud save state not shown here; no need to import the service
 import '../../core/services/service_locator.dart';
 
 class DesktopShell extends StatefulWidget {
@@ -21,7 +23,7 @@ class _DesktopShellState extends State<DesktopShell> {
   late final List<Widget> _pages = const [
     DashboardPage(embedded: true),
     PatientListPage(),
-    SyncSettingsPage(),
+    SettingsPage(),
   ];
 
   @override
@@ -170,38 +172,58 @@ class _NavItem extends StatelessWidget {
 class _ProfileTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final drive = serviceLocator.get<GoogleDriveService>();
-    final email = drive.currentAccount?.email;
-    final name = drive.currentAccount?.displayName;
+    final color = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Container(
-        height: 52,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
-          children: [
-            const CircleAvatar(child: Icon(Icons.account_circle)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name ?? 'Clinic Profile', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  if (email != null)
-                    Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                ],
-              ),
-            ),
-          ],
+      child: Center(
+        child: FilledButton(
+          onPressed: () => _openSupportDialog(context),
+          style: FilledButton.styleFrom(
+            backgroundColor: color.primary,
+            foregroundColor: color.onPrimary,
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: const Text('Contact Support'),
         ),
       ),
     );
   }
+}
+
+Future<void> _openSupportDialog(BuildContext context) async {
+  final uri = Uri.parse('mailto:docledger.pk@gmail.com?subject=${Uri.encodeComponent('DocLedger Support')}');
+  if (!context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('Contact Support'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Email us at'),
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: () => launchUrl(uri),
+                child: const Text(
+                  'docledger.pk@gmail.com',
+                  style: TextStyle(decoration: TextDecoration.underline, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+        ],
+      );
+    },
+  );
 }
 
 

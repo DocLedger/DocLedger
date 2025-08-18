@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
@@ -9,29 +10,16 @@ abstract class DatabaseService {
   Future<void> initialize();
   Future<void> close();
   
-  // Change tracking methods
-  Future<List<Map<String, dynamic>>> getChangedRecords(String tableName, int sinceTimestamp);
-  Future<void> markRecordsSynced(String tableName, List<String> recordIds);
-  Future<void> applyRemoteChanges(String tableName, List<Map<String, dynamic>> records);
-  
-  // Conflict resolution
-  Future<List<SyncConflict>> detectConflicts(String tableName, List<Map<String, dynamic>> remoteRecords);
-  Future<void> storeConflict(SyncConflict conflict);
-  Future<List<SyncConflict>> getPendingConflicts();
-  Future<void> resolveConflict(String conflictId, ConflictResolution resolution);
+  // Simplified change tracking (for cloud save)
+  Future<bool> hasDataChanged() async => true; // Simplified - always assume data has changed
   
   // Database snapshot operations
   Future<Map<String, dynamic>> exportDatabaseSnapshot();
   Future<void> importDatabaseSnapshot(Map<String, dynamic> snapshot);
   
-  // Sync metadata operations
-  Future<void> updateSyncMetadata(String tableName, {
-    int? lastSyncTimestamp,
-    int? lastBackupTimestamp,
-    int? pendingChangesCount,
-    int? conflictCount,
-  });
-  Future<Map<String, dynamic>?> getSyncMetadata(String tableName);
+  // Cloud save metadata operations (simplified)
+  Future<void> updateSyncMetadata(String key, {int? lastSyncTimestamp});
+  Future<Map<String, dynamic>?> getSyncMetadata(String key);
   
   // CRUD operations with sync tracking
   Future<void> insertPatient(Patient patient);
@@ -59,12 +47,33 @@ abstract class DatabaseService {
   Future<int> getPendingFollowUpsCountUntil(DateTime until);
   Future<List<Visit>> getUpcomingFollowUps({int limit = 5});
   Future<List<Patient>> getRecentPatients({int limit = 5});
+  
+  // Additional methods for CloudSaveService
+  Stream<void> get changesStream;
+  Future<Map<String, dynamic>?> getRecordById(String tableName, String recordId);
+  Future<void> updateRecord(String tableName, String recordId, Map<String, dynamic> record);
+  Future<void> insertRecord(String tableName, Map<String, dynamic> record);
+  Future<Map<String, dynamic>?> getSettings(String key);
+  Future<void> saveSettings(String key, Map<String, dynamic> settings);
 }
 
 /// SQLite implementation of DatabaseService with sync support
 class SQLiteDatabaseService implements DatabaseService {
   Database? _database;
   String? _deviceId;
+  final StreamController<void> _changeController = StreamController<void>.broadcast();
+  
+  // Ensures the lightweight key/value settings table exists
+  Future<void> _ensureSettingsTable() async {
+    final db = database;
+    try {
+      final sql = DatabaseSchema.createSettingsTable
+          .replaceFirst('CREATE TABLE settings', 'CREATE TABLE IF NOT EXISTS settings');
+      await db.execute(sql);
+    } catch (_) {
+      // Ignore – table may already exist or creation raced
+    }
+  }
   
   // For testing purposes
   set testDatabase(Database database) => _database = database;
@@ -89,12 +98,15 @@ class SQLiteDatabaseService implements DatabaseService {
       onCreate: DatabaseSchema.onCreate,
       onUpgrade: DatabaseSchema.onUpgrade,
     );
+    // Defensive: ensure settings table exists even if older DB missed a migration
+    await _ensureSettingsTable();
   }
   
   @override
   Future<void> close() async {
     await _database?.close();
     _database = null;
+    await _changeController.close();
   }
   
   Database get database {
@@ -104,229 +116,12 @@ class SQLiteDatabaseService implements DatabaseService {
     return _database!;
   }
   
+  // Simplified change tracking implementation
   @override
-  Future<List<Map<String, dynamic>>> getChangedRecords(String tableName, int sinceTimestamp) async {
-    final records = await database.query(
-      tableName,
-      where: 'last_modified > ? AND sync_status = ?',
-      whereArgs: [sinceTimestamp, 'pending'],
-      orderBy: 'last_modified ASC',
-    );
-    return records;
-  }
-  
-  @override
-  Future<void> markRecordsSynced(String tableName, List<String> recordIds) async {
-    if (recordIds.isEmpty) return;
-    
-    final batch = database.batch();
-    for (final recordId in recordIds) {
-      batch.update(
-        tableName,
-        {'sync_status': 'synced'},
-        where: 'id = ?',
-        whereArgs: [recordId],
-      );
-    }
-    await batch.commit(noResult: true);
-    
-    // Update sync metadata
-    await _updatePendingChangesCount(tableName);
-  }
-  
-  @override
-  Future<void> applyRemoteChanges(String tableName, List<Map<String, dynamic>> records) async {
-    if (records.isEmpty) return;
-    
-    final batch = database.batch();
-    final conflicts = <SyncConflict>[];
-    
-    for (final remoteRecord in records) {
-      final recordId = remoteRecord['id'] as String;
-      final remoteTimestamp = remoteRecord['last_modified'] as int;
-      
-      // Check if local record exists
-      final localRecords = await database.query(
-        tableName,
-        where: 'id = ?',
-        whereArgs: [recordId],
-      );
-      
-      if (localRecords.isEmpty) {
-        // No local record, insert remote record
-        final now = DateTime.now().millisecondsSinceEpoch;
-        batch.insert(tableName, {
-          ...remoteRecord,
-          'sync_status': 'synced',
-          'created_at': now,
-          'updated_at': now,
-        });
-      } else {
-        final localRecord = localRecords.first;
-        final localTimestamp = localRecord['last_modified'] as int;
-        
-        final localSyncStatus = localRecord['sync_status'] as String;
-        
-        // If local record has pending changes, create conflict regardless of timestamp
-        if (localSyncStatus == 'pending') {
-          conflicts.add(SyncConflict(
-            id: '${tableName}_${recordId}_${DateTime.now().millisecondsSinceEpoch}',
-            tableName: tableName,
-            recordId: recordId,
-            localData: Map<String, dynamic>.from(localRecord),
-            remoteData: remoteRecord,
-            conflictTime: DateTime.now(),
-            type: ConflictType.updateConflict,
-            description: 'Local record has pending changes that conflict with remote',
-          ));
-        } else if (localTimestamp < remoteTimestamp) {
-          // Remote is newer and local is synced, update local record
-          batch.update(
-            tableName,
-            {
-              ...remoteRecord,
-              'sync_status': 'synced',
-              'updated_at': DateTime.now().millisecondsSinceEpoch,
-            },
-            where: 'id = ?',
-            whereArgs: [recordId],
-          );
-        }
-        // If timestamps are equal or local is newer but synced, no action needed
-      }
-    }
-    
-    await batch.commit(noResult: true);
-    
-    // Store any conflicts found
-    for (final conflict in conflicts) {
-      await storeConflict(conflict);
-    }
-    
-    // Update sync metadata
-    await updateSyncMetadata(tableName, 
-      lastSyncTimestamp: DateTime.now().millisecondsSinceEpoch,
-      conflictCount: conflicts.length,
-    );
-  }
-  
-  @override
-  Future<List<SyncConflict>> detectConflicts(String tableName, List<Map<String, dynamic>> remoteRecords) async {
-    final conflicts = <SyncConflict>[];
-    
-    for (final remoteRecord in remoteRecords) {
-      final recordId = remoteRecord['id'] as String;
-      final remoteTimestamp = remoteRecord['last_modified'] as int;
-      
-      final localRecords = await database.query(
-        tableName,
-        where: 'id = ?',
-        whereArgs: [recordId],
-      );
-      
-      if (localRecords.isNotEmpty) {
-        final localRecord = localRecords.first;
-        final localTimestamp = localRecord['last_modified'] as int;
-        final localSyncStatus = localRecord['sync_status'] as String;
-        
-        // Conflict if both records have been modified and local is pending sync
-        if (localSyncStatus == 'pending' && localTimestamp != remoteTimestamp) {
-          conflicts.add(SyncConflict(
-            id: '${tableName}_${recordId}_${DateTime.now().millisecondsSinceEpoch}',
-            tableName: tableName,
-            recordId: recordId,
-            localData: Map<String, dynamic>.from(localRecord),
-            remoteData: remoteRecord,
-            conflictTime: DateTime.now(),
-            type: ConflictType.updateConflict,
-            description: 'Both local and remote records have been modified',
-          ));
-        }
-      }
-    }
-    
-    return conflicts;
-  }
-  
-  @override
-  Future<void> storeConflict(SyncConflict conflict) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await database.insert('sync_conflicts', {
-      'id': conflict.id,
-      'table_name': conflict.tableName,
-      'record_id': conflict.recordId,
-      'local_data': jsonEncode(conflict.localData),
-      'remote_data': jsonEncode(conflict.remoteData),
-      'conflict_timestamp': conflict.conflictTime.millisecondsSinceEpoch,
-      'conflict_type': conflict.type.name,
-      'resolution_status': 'pending',
-      'notes': conflict.description,
-      'created_at': now,
-      'updated_at': now,
-    });
-    
-    // Update conflict count in sync metadata
-    await _incrementConflictCount(conflict.tableName);
-  }
-  
-  @override
-  Future<List<SyncConflict>> getPendingConflicts() async {
-    final records = await database.query(
-      'sync_conflicts',
-      where: 'resolution_status = ?',
-      whereArgs: ['pending'],
-      orderBy: 'conflict_timestamp DESC',
-    );
-    
-    return records.map((record) => SyncConflict.fromJson(record)).toList();
-  }
-  
-  @override
-  Future<void> resolveConflict(String conflictId, ConflictResolution resolution) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    
-    // Update conflict record
-    await database.update(
-      'sync_conflicts',
-      {
-        'resolution_status': 'resolved',
-        'resolved_data': jsonEncode(resolution.resolvedData),
-        'resolution_timestamp': resolution.resolutionTime.millisecondsSinceEpoch,
-        'resolution_strategy': resolution.strategy.name,
-        'notes': resolution.notes,
-        'updated_at': now,
-      },
-      where: 'id = ?',
-      whereArgs: [conflictId],
-    );
-    
-    // Get conflict details to update the actual record
-    final conflictRecords = await database.query(
-      'sync_conflicts',
-      where: 'id = ?',
-      whereArgs: [conflictId],
-    );
-    
-    if (conflictRecords.isNotEmpty) {
-      final conflict = conflictRecords.first;
-      final tableName = conflict['table_name'] as String;
-      final recordId = conflict['record_id'] as String;
-      
-      // Apply the resolved data to the actual table
-      await database.update(
-        tableName,
-        {
-          ...resolution.resolvedData,
-          'sync_status': 'pending', // Mark for re-sync
-          'last_modified': now,
-        },
-        where: 'id = ?',
-        whereArgs: [recordId],
-      );
-      
-      // Update conflict count in sync metadata
-      await _decrementConflictCount(tableName);
-    }
+  Future<bool> hasDataChanged() async {
+    // For now, always return true to trigger saves
+    // In a more sophisticated implementation, you could track actual changes
+    return true;
   }
   
   @override
@@ -392,62 +187,51 @@ class SQLiteDatabaseService implements DatabaseService {
     }
   }
   
+  // Simplified sync metadata operations
   @override
-  Future<void> updateSyncMetadata(String tableName, {
-    int? lastSyncTimestamp,
-    int? lastBackupTimestamp,
-    int? pendingChangesCount,
-    int? conflictCount,
-  }) async {
-    final updates = <String, dynamic>{
-      'updated_at': DateTime.now().millisecondsSinceEpoch,
-    };
-    
-    if (lastSyncTimestamp != null) updates['last_sync_timestamp'] = lastSyncTimestamp;
-    if (lastBackupTimestamp != null) updates['last_backup_timestamp'] = lastBackupTimestamp;
-    if (pendingChangesCount != null) updates['pending_changes_count'] = pendingChangesCount;
-    if (conflictCount != null) updates['conflict_count'] = conflictCount;
-    
-    await database.update(
-      'sync_metadata',
-      updates,
-      where: 'table_name = ?',
-      whereArgs: [tableName],
-    );
+  Future<void> updateSyncMetadata(String key, {int? lastSyncTimestamp}) async {
+    try {
+      await _ensureSettingsTable();
+      await database.insert(
+        'settings',
+        {
+          'key': 'sync_metadata_$key',
+          'value': jsonEncode({
+            'last_sync_timestamp': lastSyncTimestamp,
+            'updated_at': DateTime.now().millisecondsSinceEpoch,
+          }),
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (e) {
+      print('Failed to update sync metadata: $e');
+    }
   }
   
   @override
-  Future<Map<String, dynamic>?> getSyncMetadata(String tableName) async {
-    final records = await database.query(
-      'sync_metadata',
-      where: 'table_name = ?',
-      whereArgs: [tableName],
-    );
+  Future<Map<String, dynamic>?> getSyncMetadata(String key) async {
+    try {
+      await _ensureSettingsTable();
+      final results = await database.query(
+        'settings',
+        where: 'key = ?',
+        whereArgs: ['sync_metadata_$key'],
+        limit: 1,
+      );
+      
+      if (results.isNotEmpty) {
+        final settingsJson = results.first['value'] as String;
+        return jsonDecode(settingsJson) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      print('Failed to get sync metadata: $e');
+    }
     
-    return records.isNotEmpty ? records.first : null;
+    return null;
   }
   
-  // Helper methods
-  Future<void> _updatePendingChangesCount(String tableName) async {
-    final count = Sqflite.firstIntValue(await database.rawQuery(
-      'SELECT COUNT(*) FROM $tableName WHERE sync_status = ?',
-      ['pending'],
-    )) ?? 0;
-    
-    await updateSyncMetadata(tableName, pendingChangesCount: count);
-  }
-  
-  Future<void> _incrementConflictCount(String tableName) async {
-    final metadata = await getSyncMetadata(tableName);
-    final currentCount = metadata?['conflict_count'] as int? ?? 0;
-    await updateSyncMetadata(tableName, conflictCount: currentCount + 1);
-  }
-  
-  Future<void> _decrementConflictCount(String tableName) async {
-    final metadata = await getSyncMetadata(tableName);
-    final currentCount = metadata?['conflict_count'] as int? ?? 0;
-    await updateSyncMetadata(tableName, conflictCount: (currentCount - 1).clamp(0, double.infinity).toInt());
-  }
+  // Simplified helper methods removed - no longer needed
   
   void _markRecordModified(Map<String, dynamic> record) {
     record['last_modified'] = DateTime.now().millisecondsSinceEpoch;
@@ -467,7 +251,7 @@ class SQLiteDatabaseService implements DatabaseService {
       'updated_at': DateTime.now().millisecondsSinceEpoch,
     });
     
-    await _updatePendingChangesCount('patients');
+    _changeController.add(null);
   }
   
   @override
@@ -485,7 +269,7 @@ class SQLiteDatabaseService implements DatabaseService {
       whereArgs: [patient.id],
     );
     
-    await _updatePendingChangesCount('patients');
+    _changeController.add(null);
   }
   
   @override
@@ -498,7 +282,7 @@ class SQLiteDatabaseService implements DatabaseService {
       await txn.delete('patients', where: 'id = ?', whereArgs: [patientId]);
     });
     
-    await _updatePendingChangesCount('patients');
+    _changeController.add(null);
   }
   
   @override
@@ -530,6 +314,7 @@ class SQLiteDatabaseService implements DatabaseService {
     });
     
     await _updatePendingChangesCount('visits');
+    _changeController.add(null);
   }
   
   @override
@@ -548,6 +333,7 @@ class SQLiteDatabaseService implements DatabaseService {
     );
     
     await _updatePendingChangesCount('visits');
+    _changeController.add(null);
   }
   
   @override
@@ -559,6 +345,7 @@ class SQLiteDatabaseService implements DatabaseService {
     );
     
     await _updatePendingChangesCount('visits');
+    _changeController.add(null);
   }
   
   @override
@@ -596,6 +383,7 @@ class SQLiteDatabaseService implements DatabaseService {
     });
     
     await _updatePendingChangesCount('payments');
+    _changeController.add(null);
   }
   
   @override
@@ -614,6 +402,7 @@ class SQLiteDatabaseService implements DatabaseService {
     );
     
     await _updatePendingChangesCount('payments');
+    _changeController.add(null);
   }
   
   @override
@@ -625,6 +414,7 @@ class SQLiteDatabaseService implements DatabaseService {
     );
     
     await _updatePendingChangesCount('payments');
+    _changeController.add(null);
   }
   
   @override
@@ -704,5 +494,99 @@ class SQLiteDatabaseService implements DatabaseService {
       [limit],
     );
     return records.map((e) => Patient.fromSyncJson(Map<String, dynamic>.from(e))).toList();
+  }
+
+  // Additional methods for CloudSaveService
+  
+  /// Stream that emits when database changes occur
+  @override
+  Stream<void> get changesStream {
+    return _changeController.stream;
+  }
+
+  /// Get a record by ID from any table
+  @override
+  Future<Map<String, dynamic>?> getRecordById(String tableName, String recordId) async {
+    final db = database;
+    final results = await db.query(
+      tableName,
+      where: 'id = ?',
+      whereArgs: [recordId],
+      limit: 1,
+    );
+    
+    return results.isNotEmpty ? results.first : null;
+  }
+
+  /// Update a record in any table
+  @override
+  Future<void> updateRecord(String tableName, String recordId, Map<String, dynamic> record) async {
+    final db = database;
+    await db.update(
+      tableName,
+      record,
+      where: 'id = ?',
+      whereArgs: [recordId],
+    );
+  }
+
+  /// Insert a record into any table
+  @override
+  Future<void> insertRecord(String tableName, Map<String, dynamic> record) async {
+    final db = database;
+    await db.insert(
+      tableName,
+      record,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Get settings by key
+  @override
+  Future<Map<String, dynamic>?> getSettings(String key) async {
+    final db = database;
+    await _ensureSettingsTable();
+    final results = await db.query(
+      'settings',
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    
+    if (results.isNotEmpty) {
+      final settingsJson = results.first['value'] as String;
+      return jsonDecode(settingsJson) as Map<String, dynamic>;
+    }
+    
+    return null;
+  }
+
+  /// Save settings by key
+  @override
+  Future<void> saveSettings(String key, Map<String, dynamic> settings) async {
+    final db = database;
+    final settingsJson = jsonEncode(settings);
+    await _ensureSettingsTable();
+    
+    await db.insert(
+      'settings',
+      {
+        'key': key,
+        'value': settingsJson,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  // Internal helper for legacy pending-changes updates (no-op in simplified model)
+  Future<void> _updatePendingChangesCount(String tableName) async {
+    try {
+      // In the simplified CloudSave model we don't track pending counts.
+      // Touch the metadata timestamp so dependent code continues to work.
+      await updateSyncMetadata(tableName, lastSyncTimestamp: DateTime.now().millisecondsSinceEpoch);
+    } catch (e) {
+      print('Failed to update pending changes count for $tableName: $e');
+    }
   }
 }

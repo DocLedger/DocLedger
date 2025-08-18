@@ -2,16 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../models/restore_models.dart';
-import '../../../core/sync/services/sync_service.dart';
 import '../../../core/cloud/services/google_drive_service.dart';
 import '../../../core/data/services/database_service.dart';
 import '../../../core/encryption/services/encryption_service.dart';
 import '../../../core/encryption/models/encryption_models.dart';
-import '../../../core/sync/models/sync_models.dart' hide RestoreResult;
 
 /// Service for handling data restoration from Google Drive backups
 class RestoreService {
-  final SyncService _syncService;
   final GoogleDriveService _driveService;
   final DatabaseService _database;
   final EncryptionService _encryption;
@@ -26,14 +23,12 @@ class RestoreService {
   bool _isCancelled = false;
 
   RestoreService({
-    required SyncService syncService,
     required GoogleDriveService driveService,
     required DatabaseService database,
     required EncryptionService encryption,
     required String clinicId,
     required String deviceId,
-  }) : _syncService = syncService,
-       _driveService = driveService,
+  }) : _driveService = driveService,
        _database = database,
        _encryption = encryption,
        _clinicId = clinicId,
@@ -428,19 +423,18 @@ class RestoreService {
   /// Decrypt backup data
   Future<Map<String, dynamic>> _decryptBackupData(List<int> encryptedBytes) async {
     try {
-      // Create EncryptedData object from bytes
-      // In a real implementation, this would properly deserialize the encrypted data structure
-      final encryptedData = EncryptedData(
-        data: encryptedBytes,
-        iv: List.filled(12, 0), // Placeholder - would be properly extracted
-        tag: List.filled(16, 0), // Placeholder - would be properly extracted
-        algorithm: 'AES-256-GCM',
-        checksum: '',
-        timestamp: DateTime.now(),
-      );
+      // Stored payload is JSON of EncryptedData
+      final parsed = jsonDecode(utf8.decode(encryptedBytes)) as Map<String, dynamic>;
+      final encryptedData = EncryptedData.fromJson(parsed);
 
-      final encryptionKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
-      return await _encryption.decryptData(encryptedData, encryptionKey);
+      // Try clinic-wide key first; fallback to legacy device-based key
+      final clinicWideKey = await _encryption.deriveEncryptionKey(_clinicId, _clinicId);
+      try {
+        return await _encryption.decryptData(encryptedData, clinicWideKey);
+      } catch (_) {
+        final legacyKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
+        return await _encryption.decryptData(encryptedData, legacyKey);
+      }
     } catch (e) {
       throw RestoreException(
         'Failed to decrypt backup data: ${e.toString()}',
@@ -487,9 +481,6 @@ class RestoreService {
       await _database.updateSyncMetadata(
         tableName,
         lastSyncTimestamp: now,
-        lastBackupTimestamp: now,
-        pendingChangesCount: 0,
-        conflictCount: 0,
       );
     }
   }
