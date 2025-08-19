@@ -61,6 +61,7 @@ class _HomeTab extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isCompact = constraints.maxWidth < 700;
+        final isVeryCompact = constraints.maxWidth < 380;
         return SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           child: Column(
@@ -107,11 +108,11 @@ class _HomeTab extends StatelessWidget {
               return GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: isVeryCompact ? 1 : 2,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
-                  mainAxisExtent: 128, // taller cards to avoid overflow
+                  mainAxisExtent: 132,
                 ),
                 itemCount: tiles.length,
                 itemBuilder: (_, i) => tiles[i],
@@ -136,24 +137,30 @@ class _HomeTab extends StatelessWidget {
                 Column(
                   children: [
                     _DashboardCard(
-                      child: Column(
+                      child: SizedBox(
+                        height: 220,
+                        child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const _SectionTitle('Upcoming Follow-ups'),
                           const SizedBox(height: 8),
                           _UpcomingList(repo: repo, embedded: true),
                         ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
                     _DashboardCard(
-                      child: Column(
+                      child: SizedBox(
+                        height: 220,
+                        child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const _SectionTitle('Recent Patients'),
                           const SizedBox(height: 8),
                           _RecentPatientsList(repo: repo, embedded: true),
                         ],
+                        ),
                       ),
                     ),
                   ],

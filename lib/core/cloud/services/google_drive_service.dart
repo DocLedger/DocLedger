@@ -149,9 +149,17 @@ class GoogleDriveService {
       GoogleSignInAccount? account;
       
       if (forceAccountSelection) {
-        // Sign out first to force account selection
-        await _googleSignIn.signOut();
+        // Do NOT sign out. Prompt chooser, keep previous session on cancel.
+        final previousAccount = _currentAccount;
         account = await _googleSignIn.signIn();
+        if (account == null) {
+          if (previousAccount != null && _authClient != null && _driveApi != null) {
+            _authState = AuthenticationState.authenticated;
+            return true; // keep existing link
+          }
+          _authState = AuthenticationState.notAuthenticated;
+          return false;
+        }
       } else {
         // Try silent sign-in first
         account = await _googleSignIn.signInSilently();
@@ -199,8 +207,9 @@ class GoogleDriveService {
   /// Restore authentication from stored credentials
   Future<void> _restoreAuthentication(
     Map<String, dynamic> tokenData,
-    Map<String, dynamic> accountData,
-  ) async {
+    Map<String, dynamic> accountData, {
+    bool verify = true,
+  }) async {
     // Create auth client from stored tokens
     final accessToken = AccessToken(
       'Bearer',
@@ -221,15 +230,20 @@ class GoogleDriveService {
     // In a real implementation, you'd need to properly restore the account
     // For now, we'll mark as authenticated and verify with API call
     
-    // Verify authentication is still valid
-    try {
-      await _driveApi!.about.get($fields: 'user');
-      await _ensureBackupFolder();
+    if (verify) {
+      // Verify authentication is still valid
+      try {
+        await _driveApi!.about.get($fields: 'user');
+        await _ensureBackupFolder();
+        _authState = AuthenticationState.authenticated;
+      } catch (e) {
+        // Token might be expired, clear stored data and require fresh auth
+        await _clearStoredCredentials();
+        _authState = AuthenticationState.tokenExpired;
+      }
+    } else {
+      // Best-effort restoration without verification (used on cancel)
       _authState = AuthenticationState.authenticated;
-    } catch (e) {
-      // Token might be expired, clear stored data and require fresh auth
-      await _clearStoredCredentials();
-      _authState = AuthenticationState.tokenExpired;
     }
   }
 
@@ -244,9 +258,6 @@ class GoogleDriveService {
       if (accessToken == null) {
         throw GoogleDriveException('No access token found in auth headers');
       }
-      
-      // Get authentication details from Google Sign-In
-      final authentication = await account.authentication;
       
       final tokenData = {
         'access_token': accessToken,

@@ -6,6 +6,7 @@ import '../../../../core/cloud/services/google_drive_service.dart';
 import '../../../../core/data/services/database_service.dart';
 import '../../../subscription/presentation/pages/subscription_page.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../dashboard/presentation/dashboard_page.dart';
 
 /// Simplified cloud save settings page
 class SettingsPage extends StatefulWidget {
@@ -187,7 +188,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 isLinked ? Icons.swap_horiz : Icons.link,
                                 size: 18,
                               ),
-                              label: Text(isLinked ? 'Switch' : 'Link Account'),
+                              label: Text(isLinked ? 'Switch' : 'Link'),
                             ),
                           ],
                         ),
@@ -448,7 +449,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Automatically save your data to Google Drive with simple controls.',
+              'Automatically save your data to cloud with simple controls.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -456,7 +457,7 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 12),
             _SettingSwitch(
               title: 'Auto-Save to Cloud',
-              subtitle: 'Automatically save your data to Google Drive',
+              subtitle: 'Automatically save your data to cloud',
               value: _cloudSaveService?.autoSaveEnabled ?? true,
               onChanged: _cloudSaveService == null ? null : (value) async {
                 await _cloudSaveService!.setAutoSaveEnabled(value);
@@ -671,16 +672,20 @@ class _SettingsPageState extends State<SettingsPage> {
     );
 
     if (confirmed != true) return;
+    await _startRestoreDirect();
+  }
 
-    setState(() => _isLoading = true);
-    
+  Future<void> _startRestoreDirect() async {
     if (_cloudSaveService == null) return;
-    
+    // Inform user immediately; progress will appear in the Status card
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Restoring data from cloud...')),
+      );
+    }
     try {
       final result = await _cloudSaveService!.restoreFromCloud();
-      
       if (!mounted) return;
-      
       if (result.isSuccess) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -704,13 +709,10 @@ class _SettingsPageState extends State<SettingsPage> {
           backgroundColor: Colors.red,
         ),
       );
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _syncNow() async {
-    setState(() => _isLoading = true);
     try {
       final result = await _cloudSaveService!.syncNow();
       if (!mounted) return;
@@ -723,9 +725,7 @@ class _SettingsPageState extends State<SettingsPage> {
           SnackBar(content: Text(result.errorMessage ?? 'Sync failed')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    } finally {}
   }
 
   Future<void> _openSupportDialog() async {
@@ -806,7 +806,11 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       );
       if (restoreNow == true) {
-        await _restoreFromCloud();
+        // Navigate away immediately, then start restore (status card will show progress)
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed('/');
+        }
+        await _startRestoreDirect();
         return;
       }
       // User skipped restore while a cloud backup exists: do NOT create a new

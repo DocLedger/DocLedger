@@ -129,6 +129,16 @@ class DataRepository {
     }
   }
 
+  /// Updates an existing payment and triggers sync
+  Future<void> updatePayment(Payment payment) async {
+    try {
+      await _database.updateRecord('payments', payment.id, payment.toSyncJson());
+      _triggerSync();
+    } catch (e) {
+      throw DataRepositoryException('Failed to update payment: $e');
+    }
+  }
+
   // Sync operations
 
   /// Gets the count of pending sync operations

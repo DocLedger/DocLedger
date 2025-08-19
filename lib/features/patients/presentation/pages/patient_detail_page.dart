@@ -236,17 +236,18 @@ class _VisitCard extends StatelessWidget {
                         runSpacing: 6,
                         children: [
                           _StatusChip(
-                            label: dueAmount > 0 ? 'Due Rs.${dueAmount.toStringAsFixed(0)}' : 'Paid',
+                            label: dueAmount > 0
+                                ? 'Due Rs.${dueAmount.toStringAsFixed(0)}'
+                                : 'Paid',
                             color: dueAmount > 0 ? Colors.orange : Colors.green,
                           ),
-                          _StatusChip(label: 'Paid Rs.${paidAmount.toStringAsFixed(0)}'),
                         ],
                       ),
                     ),
                     const SizedBox(width: 8),
                     _ActionIcon(icon: Icons.edit, tooltip: 'Edit', onPressed: onEdit),
                     const SizedBox(width: 7),
-                    _ActionIcon(icon: Icons.payments, tooltip: 'Add payment', onPressed: onAddPayment),
+                    _ActionIcon(icon: Icons.payments, tooltip: 'Add/Edit payment', onPressed: onAddPayment),
                     const SizedBox(width: 7),
                     _ActionIcon(icon: Icons.print, tooltip: 'Print', onPressed: onPrint),
                     const SizedBox(width: 7),
@@ -767,9 +768,12 @@ extension on _PatientDetailPageState {
   }
 
   Future<void> _addPayment(Visit v) async {
-    final amountCtrl = TextEditingController();
-    final methodCtrl = TextEditingController(text: 'Cash');
-    final notesCtrl = TextEditingController();
+    // Pre-fill with previous payment (if any) and allow editing
+    final previous = _payments.where((p) => p.visitId == v.id).toList()
+      ..sort((a, b) => b.paymentDate.compareTo(a.paymentDate));
+    final last = previous.isNotEmpty ? previous.first : null;
+    final amountCtrl = TextEditingController(text: last?.amount.toStringAsFixed(0) ?? '');
+    final methodCtrl = TextEditingController(text: last?.paymentMethod ?? 'Cash');
 
     final ok = await showDialog<bool>(
       context: context,
@@ -786,8 +790,7 @@ extension on _PatientDetailPageState {
                 TextField(controller: amountCtrl, decoration: const InputDecoration(labelText: 'Amount (Rs.)'), keyboardType: TextInputType.number),
                 const SizedBox(height: 6),
                 TextField(controller: methodCtrl, decoration: const InputDecoration(labelText: 'Method')),
-                const SizedBox(height: 6),
-                TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Notes')),
+                // Removed notes per requirement
               ],
             ),
           ),
@@ -802,18 +805,28 @@ extension on _PatientDetailPageState {
     if (ok == true) {
       final amount = double.tryParse(amountCtrl.text.trim());
       if (amount == null || amount <= 0) return;
-      final p = Payment(
-        id: 'pay_${DateTime.now().millisecondsSinceEpoch}',
-        patientId: v.patientId,
-        visitId: v.id,
-        amount: amount,
-        paymentDate: DateTime.now(),
-        paymentMethod: methodCtrl.text.trim().isEmpty ? 'Cash' : methodCtrl.text.trim(),
-        notes: notesCtrl.text.trim().isEmpty ? null : notesCtrl.text.trim(),
-        lastModified: DateTime.now(),
-        deviceId: 'local',
-      );
-      await _repo.addPayment(p);
+      if (last != null) {
+        // Edit last payment entry
+        final updated = last.copyWith(
+          amount: amount,
+          paymentMethod: methodCtrl.text.trim().isEmpty ? 'Cash' : methodCtrl.text.trim(),
+          lastModified: DateTime.now(),
+        );
+        await _repo.updatePayment(updated);
+      } else {
+        final p = Payment(
+          id: 'pay_${DateTime.now().millisecondsSinceEpoch}',
+          patientId: v.patientId,
+          visitId: v.id,
+          amount: amount,
+          paymentDate: DateTime.now(),
+          paymentMethod: methodCtrl.text.trim().isEmpty ? 'Cash' : methodCtrl.text.trim(),
+          notes: null,
+          lastModified: DateTime.now(),
+          deviceId: 'local',
+        );
+        await _repo.addPayment(p);
+      }
       await _load();
     }
   }
