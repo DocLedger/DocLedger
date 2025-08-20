@@ -93,7 +93,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildAccountSection() {
     final isLinked = _driveService?.isAuthenticated ?? false;
-    final email = _driveService?.currentAccount?.email ?? '';
+    final email = _driveService?.linkedEmail ?? _driveService?.currentAccount?.email ?? '';
     final isMobile = MediaQuery.sizeOf(context).width < 600;
     
     return Card(
@@ -119,226 +119,157 @@ class _SettingsPageState extends State<SettingsPage> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: isMobile
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 48,
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: isLinked 
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.surfaceVariant,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                isLinked ? Icons.account_circle : Icons.account_circle_outlined,
-                                color: isLinked 
-                                  ? Theme.of(context).colorScheme.onPrimary
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
-                                size: 28,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Text(
-                                isLinked ? 'Google Account Linked' : 'No Account Linked',
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: isLinked 
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            FilledButton.icon(
-                              onPressed: _isLoading || _driveService == null
-                                  ? null
-                                  : () async {
-                                      setState(() => _isLoading = true);
-                                      try {
-                                        final ok = await _driveService!.authenticate(forceAccountSelection: true);
-                                        if (!mounted) return;
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text(ok ? 'Google account linked successfully' : 'Account linking cancelled')),
-                                        );
-                                        setState(() {
-                                          if (ok) {
-                                            _currentState = CloudSaveState.idle(
-                                              lastSaveTime: _currentState?.lastSaveTime,
-                                            );
-                                          }
-                                        });
-                                        if (ok) {
-                                          await _handlePostLink();
-                                        }
-                                      } catch (e) {
-                                        if (!mounted) return;
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text('Failed to link account: $e')),
-                                        );
-                                      } finally {
-                                        if (mounted) setState(() => _isLoading = false);
-                                      }
-                                    },
-                              icon: Icon(
-                                isLinked ? Icons.swap_horiz : Icons.link,
-                                size: 18,
-                              ),
-                              label: Text(isLinked ? 'Switch' : 'Link'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surface,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                (isLinked && email.isNotEmpty) ? Icons.email_outlined : Icons.info_outline,
-                                size: 18,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  (isLinked && email.isNotEmpty)
-                                      ? 'Account email: $email'
-                                      : 'Link your Google account to enable cloud storage',
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                      ),
-                                  softWrap: true,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 48,
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: isLinked 
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.surfaceVariant,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                isLinked ? Icons.account_circle : Icons.account_circle_outlined,
-                                color: isLinked 
-                                  ? Theme.of(context).colorScheme.onPrimary
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
-                                size: 28,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Text(
-                                isLinked ? 'Google Account Linked' : 'No Account Linked',
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: isLinked 
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            FilledButton.icon(
-                              onPressed: _isLoading || _driveService == null
-                                  ? null
-                                  : () async {
-                                      setState(() => _isLoading = true);
-                                      try {
-                                        final ok = await _driveService!.authenticate(forceAccountSelection: true);
-                                        if (!mounted) return;
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text(ok ? 'Google account linked successfully' : 'Account linking cancelled')),
-                                        );
-                                        setState(() {
-                                          if (ok) {
-                                            _currentState = CloudSaveState.idle(
-                                              lastSaveTime: _currentState?.lastSaveTime,
-                                            );
-                                          }
-                                        });
-                                        if (ok) {
-                                          await _handlePostLink();
-                                        }
-                                      } catch (e) {
-                                        if (!mounted) return;
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text('Failed to link account: $e')),
-                                        );
-                                      } finally {
-                                        if (mounted) setState(() => _isLoading = false);
-                                      }
-                                    },
-                              icon: Icon(
-                                isLinked ? Icons.swap_horiz : Icons.link,
-                                size: 18,
-                              ),
-                              label: Text(isLinked ? 'Switch' : 'Link'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surface,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                (isLinked && email.isNotEmpty) ? Icons.email_outlined : Icons.info_outline,
-                                size: 18,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  (isLinked && email.isNotEmpty)
-                                      ? 'Account email: $email'
-                                      : 'Link your Google account to enable cloud storage',
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                      ),
-                                  softWrap: true,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                  ? _accountRow(isLinked, email)
+                  : _accountRow(isLinked, email),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _accountRow(bool isLinked, String email) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: isLinked 
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.surfaceVariant,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isLinked ? Icons.account_circle : Icons.account_circle_outlined,
+                color: isLinked 
+                  ? Theme.of(context).colorScheme.onPrimary
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                size: 28,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                isLinked ? 'Google Account Linked' : 'No Account Linked',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: isLinked 
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: _isLoading || _driveService == null
+                  ? null
+                  : () async {
+                      setState(() => _isLoading = true);
+                      try {
+                        final wasLinked = isLinked;
+                        bool didLinkOrSwitch = false;
+                        bool cancelled = false;
+
+                        if (wasLinked) {
+                          final result = await _driveService!.switchAccount();
+                          if (!mounted) return;
+                          switch (result) {
+                            case SwitchAccountResult.switched:
+                              didLinkOrSwitch = true;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Account switched')),
+                              );
+                              break;
+                            case SwitchAccountResult.unchanged:
+                              // No snackbar needed; nothing really changed
+                              break;
+                            case SwitchAccountResult.cancelled:
+                              cancelled = true;
+                              // No snackbar; user cancelled
+                              break;
+                          }
+                        } else {
+                          final ok = await _driveService!.authenticate(forceAccountSelection: true);
+                          if (!mounted) return;
+                          didLinkOrSwitch = ok;
+                          if (ok) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Google account linked successfully')),
+                            );
+                          } else {
+                            cancelled = true;
+                          }
+                        }
+
+                        if (didLinkOrSwitch) {
+                          setState(() {
+                            _currentState = CloudSaveState.idle(
+                              lastSaveTime: _currentState?.lastSaveTime,
+                            );
+                          });
+                          // Only trigger post-link flow if we just linked from an unlinked state
+                          if (!wasLinked) {
+                            await _handlePostLink();
+                          }
+                        } else if (!cancelled) {
+                          // Operation completed but unchanged; just refresh UI state
+                          setState(() {});
+                        }
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed: $e')),
+                        );
+                      } finally {
+                        if (mounted) setState(() => _isLoading = false);
+                      }
+                    },
+              icon: Icon(
+                isLinked ? Icons.swap_horiz : Icons.link,
+                size: 18,
+              ),
+              label: Text(isLinked ? 'Switch' : 'Link'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                (isLinked && email.isNotEmpty) ? Icons.email_outlined : Icons.info_outline,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  (isLinked && email.isNotEmpty)
+                      ? 'Account email: $email'
+                      : 'Link your Google account to enable cloud storage',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                  softWrap: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

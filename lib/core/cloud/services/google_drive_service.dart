@@ -29,6 +29,13 @@ enum AuthenticationState {
   tokenExpired,
 }
 
+/// Result of attempting to switch Google accounts
+enum SwitchAccountResult {
+  switched,
+  cancelled,
+  unchanged,
+}
+
 /// Progress callback for file operations
 typedef ProgressCallback = void Function(int bytesTransferred, int totalBytes);
 
@@ -51,6 +58,9 @@ class GoogleDriveService {
   String? _backupFolderId;
   
   AuthenticationState _authState = AuthenticationState.notAuthenticated;
+
+  // Cache linked email so UI can show the account even if we temporarily lose the GoogleSignIn session
+  String? _cachedEmail;
   
   GoogleDriveService({
     GoogleSignIn? googleSignIn,
@@ -63,6 +73,9 @@ class GoogleDriveService {
 
   /// Currently authenticated account
   GoogleSignInAccount? get currentAccount => _currentAccount;
+
+  /// Email of the linked account (falls back to cached value)
+  String? get linkedEmail => _currentAccount?.email ?? _cachedEmail;
 
   /// Whether the service is currently authenticated
   bool get isAuthenticated => _authState == AuthenticationState.authenticated;
@@ -115,6 +128,9 @@ class GoogleDriveService {
         try {
           final tokenData = jsonDecode(storedTokens) as Map<String, dynamic>;
           final accountData = jsonDecode(storedAccount) as Map<String, dynamic>;
+
+          // Cache email for UI
+          _cachedEmail = accountData['email'] as String?;
           
           // Attempt to restore authentication with stored tokens
           await _restoreAuthentication(tokenData, accountData);
@@ -225,10 +241,9 @@ class GoogleDriveService {
     
     _authClient = authenticatedClient(http.Client(), credentials);
     _driveApi = drive.DriveApi(_authClient!);
-    
-    // Create a mock account from stored data (simplified approach)
-    // In a real implementation, you'd need to properly restore the account
-    // For now, we'll mark as authenticated and verify with API call
+
+    // Cache email
+    _cachedEmail = (accountData['email'] as String?) ?? _cachedEmail;
     
     if (verify) {
       // Verify authentication is still valid
@@ -272,6 +287,9 @@ class GoogleDriveService {
         'displayName': account.displayName,
         'photoUrl': account.photoUrl,
       };
+
+      // Cache email for UI
+      _cachedEmail = account.email;
       
       await _secureStorage.write(key: _tokenKey, value: jsonEncode(tokenData));
       await _secureStorage.write(key: _accountKey, value: jsonEncode(accountData));
@@ -338,6 +356,64 @@ class GoogleDriveService {
   Future<void> _clearStoredCredentials() async {
     await _secureStorage.delete(key: _tokenKey);
     await _secureStorage.delete(key: _accountKey);
+  }
+
+  /// Switch to a different Google account (shows chooser; preserves existing on cancel)
+  Future<SwitchAccountResult> switchAccount() async {
+    try {
+      // Snapshot current stored credentials to allow restoration on cancel
+      final storedTokens = await _secureStorage.read(key: _tokenKey);
+      final storedAccount = await _secureStorage.read(key: _accountKey);
+      final prevAccount = _currentAccount;
+      final prevEmail = prevAccount?.email;
+      final prevId = prevAccount?.id;
+
+      // Force chooser by signing out of the GoogleSignIn session only (do not clear our stored tokens)
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
+
+      // Prompt user to pick an account
+      final account = await _googleSignIn.signIn();
+
+      if (account == null) {
+        // User cancelled; attempt to restore previous auth
+        if (storedTokens != null && storedAccount != null) {
+          try {
+            final tokenData = jsonDecode(storedTokens) as Map<String, dynamic>;
+            final accountData = jsonDecode(storedAccount) as Map<String, dynamic>;
+            _cachedEmail = accountData['email'] as String?;
+            await _restoreAuthentication(tokenData, accountData, verify: true);
+            return SwitchAccountResult.cancelled; // keep previous link
+          } catch (_) {/* fall through */}
+        }
+        if (prevAccount != null && _authClient != null && _driveApi != null) {
+          // Best-effort: mark still authenticated with previous session
+          _currentAccount = prevAccount;
+          _authState = AuthenticationState.authenticated;
+          return SwitchAccountResult.cancelled;
+        }
+        _authState = AuthenticationState.notAuthenticated;
+        return SwitchAccountResult.cancelled;
+      }
+
+      // If the selected account is the same as previous, treat as unchanged
+      if (prevEmail != null && (account.email == prevEmail || account.id == prevId)) {
+        // Refresh auth to be safe but report unchanged
+        await _completeAuthentication(account);
+        return SwitchAccountResult.unchanged;
+      }
+
+      // New account selected
+      await _completeAuthentication(account);
+      return SwitchAccountResult.switched;
+    } catch (e) {
+      _authState = AuthenticationState.authenticationFailed;
+      throw GoogleDriveException(
+        'Failed to switch account: ${e.toString()}',
+        originalException: e is Exception ? e : Exception(e.toString()),
+      );
+    }
   }
 
   /// Ensure the backup folder exists in Google Drive
@@ -410,19 +486,6 @@ class GoogleDriveService {
     } catch (e) {
       throw GoogleDriveException(
         'Failed to get available accounts: ${e.toString()}',
-        originalException: e is Exception ? e : Exception(e.toString()),
-      );
-    }
-  }
-
-  /// Switch to a different Google account
-  Future<bool> switchAccount() async {
-    try {
-      await _googleSignIn.signOut();
-      return await authenticate(forceAccountSelection: true);
-    } catch (e) {
-      throw GoogleDriveException(
-        'Failed to switch account: ${e.toString()}',
         originalException: e is Exception ? e : Exception(e.toString()),
       );
     }
