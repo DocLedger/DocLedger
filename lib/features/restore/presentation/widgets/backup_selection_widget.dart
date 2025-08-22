@@ -36,7 +36,7 @@ class BackupSelectionWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildHeader(Context context) {
+  Widget _buildHeader(BuildContext context) {
     final validBackups = backups.where((backup) => backup.isValid).length;
     final totalBackups = backups.length;
 
@@ -84,12 +84,12 @@ class BackupSelectionWidget extends StatelessWidget {
       separatorBuilder: (context, index) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final backup = backups[index];
-        return _buildBackupCard(context, backup);
+        return _buildBackupCard(context, backup, index);
       },
     );
   }
 
-  Widget _buildBackupCard(BuildContext context, RestoreBackupInfo backup) {
+  Widget _buildBackupCard(BuildContext context, RestoreBackupInfo backup, int index) {
     final isSelected = selectedBackup?.id == backup.id;
     final dateFormat = DateFormat('MMM dd, yyyy \'at\' HH:mm');
 
@@ -193,35 +193,6 @@ class BackupSelectionWidget extends StatelessWidget {
                   ),
                 ),
               ],
-              if (!backup.isValid) ...[
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.errorContainer,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.warning,
-                        size: 16,
-                        color: Theme.of(context).colorScheme.onErrorContainer,
-                      ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          backup.validationError ?? 'Invalid backup',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onErrorContainer,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               if (backup.isValid && index == 0) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -276,7 +247,7 @@ class BackupSelectionWidget extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'No backup files were found in your Google Drive.\nYou can start fresh or check your Google account.',
+            'No backup files were found in your WebDAV cloud storage.\nYou can start fresh or verify your cloud link in Settings.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),

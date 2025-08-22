@@ -4,9 +4,10 @@ import 'package:flutter/foundation.dart';
 import '../cloud/services/cloud_save_service.dart';
 import '../data/services/database_service.dart';
 import '../data/repositories/data_repository.dart';
-import '../cloud/services/google_drive_service.dart';
 import '../encryption/services/encryption_service.dart';
 import '../connectivity/services/connectivity_service.dart';
+import '../cloud/services/webdav_backup_service.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Global service locator
 final GetIt serviceLocator = GetIt.instance;
@@ -34,24 +35,27 @@ Future<void> initializeServices() async {
     await database.initialize();
     serviceLocator.registerSingleton<DatabaseService>(database);
 
-    // Google Drive
-    final driveService = GoogleDriveService();
-    // Best-effort init; may fail on desktop without Google setup
-    try {
-      await driveService.initialize();
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('GoogleDriveService init skipped/failed on this platform: $e');
-      }
-    }
-    serviceLocator.registerSingleton<GoogleDriveService>(driveService);
+    // WebDAV backup service
+    final webDavService = WebDavBackupService();
+    await webDavService.initialize();
+    serviceLocator.registerSingleton<WebDavBackupService>(webDavService);
 
-    // Cloud Save service (simplified unified service)
+    // Cloud Save service using WebDAV
+    // Determine final clinic id: prefer username-based if available in storage
+    String finalClinicId = clinicId;
+    try {
+      const storage = FlutterSecureStorage();
+      final storedUsername = await storage.read(key: 'webdav_username');
+      if (storedUsername != null && storedUsername.isNotEmpty) {
+        finalClinicId = 'clinic_${storedUsername.toLowerCase()}';
+      }
+    } catch (_) {}
+
     final cloudSaveService = CloudSaveService(
       database: database,
-      driveService: driveService,
+      backupService: webDavService,
       encryption: encryptionService,
-      clinicId: clinicId,
+      clinicId: finalClinicId,
       deviceId: deviceId,
     );
     try {

@@ -2,14 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../models/restore_models.dart';
-import '../../../core/cloud/services/google_drive_service.dart';
+import '../../../core/cloud/services/webdav_backup_service.dart';
 import '../../../core/data/services/database_service.dart';
 import '../../../core/encryption/services/encryption_service.dart';
 import '../../../core/encryption/models/encryption_models.dart';
 
-/// Service for handling data restoration from Google Drive backups
+/// Service for handling data restoration from cloud backups (WebDAV)
 class RestoreService {
-  final GoogleDriveService _driveService;
+  final WebDavBackupService _backupService;
   final DatabaseService _database;
   final EncryptionService _encryption;
   final String _clinicId;
@@ -23,12 +23,12 @@ class RestoreService {
   bool _isCancelled = false;
 
   RestoreService({
-    required GoogleDriveService driveService,
+    required WebDavBackupService backupService,
     required DatabaseService database,
     required EncryptionService encryption,
     required String clinicId,
     required String deviceId,
-  }) : _driveService = driveService,
+  }) : _backupService = backupService,
        _database = database,
        _encryption = encryption,
        _clinicId = clinicId,
@@ -53,17 +53,12 @@ class RestoreService {
       _isCancelled = false;
       _updateState(RestoreState.initial());
 
-      // Step 1: Check Google Drive authentication
-      if (!_driveService.isAuthenticated) {
-        _updateState(RestoreState.restoring(operation: 'Authenticating with Google Drive'));
-        
-        final authenticated = await _driveService.authenticate();
-        if (!authenticated) {
-          throw RestoreException(
-            'Google Drive authentication failed',
-            code: 'AUTH_FAILED',
-          );
-        }
+      // Step 1: Check WebDAV readiness
+      if (!await _backupService.isReady()) {
+        throw RestoreException(
+          'Not linked to cloud storage',
+          code: 'AUTH_REQUIRED',
+        );
       }
 
       // Step 2: List available backups
@@ -73,17 +68,19 @@ class RestoreService {
       
       if (availableBackups.isEmpty) {
         stopwatch.stop();
+        // Strict: show backup not found via state; return failure
+        final msg = 'No backups found in cloud storage';
+        _updateState(RestoreState.error(msg));
         return RestoreResult.failure(
           duration: stopwatch.elapsed,
-          errorMessage: 'No backups found in Google Drive',
+          errorMessage: msg,
         );
       }
 
       // Step 3: Present backup selection to user
       _updateState(RestoreState.selectingBackup(availableBackups));
       
-      // Wait for user to select a backup (this would be handled by UI)
-      // For now, we'll automatically select the latest valid backup
+      // Wait for user to select a backup (handled by UI). Default to latest valid backup
       final selectedBackup = availableBackups.firstWhere(
         (backup) => backup.isValid,
         orElse: () => availableBackups.first,
@@ -120,8 +117,8 @@ class RestoreService {
     return await _getAvailableBackups();
   }
 
-  /// Restore data from a specific backup file
-  Future<RestoreResult> restoreFromBackup(String backupFileId) async {
+  /// Restore data from a specific backup file (id == WebDAV file path)
+  Future<RestoreResult> restoreFromBackup(String backupFilePath) async {
     final stopwatch = Stopwatch()..start();
     
     try {
@@ -135,7 +132,7 @@ class RestoreService {
       
       if (_isCancelled) throw RestoreException('Restoration cancelled by user');
       
-      final isValid = await _validateBackupFile(backupFileId);
+      final isValid = await _validateBackupFile(backupFilePath);
       if (!isValid) {
         throw RestoreException(
           'Backup file validation failed',
@@ -151,11 +148,11 @@ class RestoreService {
       
       if (_isCancelled) throw RestoreException('Restoration cancelled by user');
       
-      final encryptedBytes = await _driveService.downloadBackupFile(
-        backupFileId,
+      final encryptedBytes = await _backupService.downloadBackupFile(
+        backupFilePath,
         onProgress: (transferred, total) {
           if (_isCancelled) return;
-          final downloadProgress = 0.2 + (0.3 * (transferred / total));
+          final downloadProgress = 0.2 + (0.3 * (total == 0 ? 0 : (transferred / total)));
           _updateState(RestoreState.restoring(
             operation: 'Downloading backup ($transferred/$total bytes)',
             progress: downloadProgress,
@@ -215,7 +212,7 @@ class RestoreService {
         duration: stopwatch.elapsed,
         restoredCounts: restoredCounts,
         metadata: {
-          'backup_file_id': backupFileId,
+          'backup_file_path': backupFilePath,
           'backup_timestamp': backupData.timestamp.toIso8601String(),
           'backup_device_id': backupData.deviceId,
           'tables_restored': backupData.tables.length,
@@ -239,7 +236,7 @@ class RestoreService {
   }
 
   /// Handle partial restoration scenarios gracefully
-  Future<RestoreResult> handlePartialRestore(String backupFileId, {
+  Future<RestoreResult> handlePartialRestore(String backupFilePath, {
     List<String>? tablesToRestore,
     bool skipCorruptedTables = true,
   }) async {
@@ -254,7 +251,7 @@ class RestoreService {
         progress: 0.1,
       ));
       
-      final encryptedBytes = await _driveService.downloadBackupFile(backupFileId);
+      final encryptedBytes = await _backupService.downloadBackupFile(backupFilePath);
       final decryptedData = await _decryptBackupData(encryptedBytes);
       final backupData = BackupData.fromJson(decryptedData);
 
@@ -299,7 +296,7 @@ class RestoreService {
         duration: stopwatch.elapsed,
         restoredCounts: restoredCounts,
         metadata: {
-          'backup_file_id': backupFileId,
+          'backup_file_path': backupFilePath,
           'partial_restore': true,
           'failed_tables': failedTables,
           'tables_requested': tablesToProcess.length,
@@ -341,38 +338,36 @@ class RestoreService {
   /// Get list of available backups with validation
   Future<List<RestoreBackupInfo>> _getAvailableBackups() async {
     try {
-      final backupFiles = await _driveService.listBackupFiles();
+      final files = await _backupService.listBackups(_clinicId);
       final restoreBackups = <RestoreBackupInfo>[];
 
-      for (final file in backupFiles) {
+      for (final file in files) {
         // Basic validation - check if file name matches expected pattern
+        final name = Uri.decodeComponent(file.path.split('/').last);
         bool isValid = true;
         String? validationError;
 
-        if (!file.name.contains(_clinicId)) {
+        if (!name.contains(_clinicId)) {
           isValid = false;
           validationError = 'Backup does not belong to this clinic';
-        } else if (file.size == 0) {
-          isValid = false;
-          validationError = 'Backup file is empty';
-        } else if (file.name.isEmpty || !file.name.endsWith('.enc')) {
+        } else if (!name.endsWith('.enc')) {
           isValid = false;
           validationError = 'Invalid backup file format';
         }
 
         restoreBackups.add(RestoreBackupInfo(
-          id: file.id,
-          name: file.name,
-          size: file.size,
-          createdTime: file.createdTime,
+          id: file.path,
+          name: name,
+          size: 0,
+          createdTime: file.modifiedTime,
           modifiedTime: file.modifiedTime,
-          description: file.description,
+          description: null,
           isValid: isValid,
           validationError: validationError,
         ));
       }
 
-      // Sort by creation time (newest first)
+      // Sort by modification time (newest first)
       restoreBackups.sort((a, b) => b.createdTime.compareTo(a.createdTime));
 
       return restoreBackups;
@@ -385,27 +380,20 @@ class RestoreService {
   }
 
   /// Validate backup file before restoration
-  Future<bool> _validateBackupFile(String backupFileId) async {
+  Future<bool> _validateBackupFile(String backupFilePath) async {
     try {
-      // Get file metadata
-      final backupFiles = await _driveService.listBackupFiles();
-      final backupFile = backupFiles.firstWhere(
-        (file) => file.id == backupFileId,
-        orElse: () => throw RestoreException('Backup file not found'),
-      );
-
       // Basic validation checks
-      if (backupFile.size == 0) {
-        throw RestoreException('Backup file is empty');
+      final name = backupFilePath.split('/').last;
+      if (!name.endsWith('.enc')) {
+        throw RestoreException('Invalid backup file format');
       }
-
-      if (!backupFile.name.contains(_clinicId)) {
+      if (!name.contains(_clinicId)) {
         throw RestoreException('Backup does not belong to this clinic');
       }
 
-      // Try to download a small portion to verify accessibility
+      // Try to download to verify accessibility
       try {
-        await _driveService.downloadBackupFile(backupFileId);
+        await _backupService.downloadBackupFile(backupFilePath);
       } catch (e) {
         throw RestoreException('Backup file is not accessible or corrupted');
       }
@@ -427,14 +415,10 @@ class RestoreService {
       final parsed = jsonDecode(utf8.decode(encryptedBytes)) as Map<String, dynamic>;
       final encryptedData = EncryptedData.fromJson(parsed);
 
-      // Try clinic-wide key first; fallback to legacy device-based key
-      final clinicWideKey = await _encryption.deriveEncryptionKey(_clinicId, _clinicId);
-      try {
-        return await _encryption.decryptData(encryptedData, clinicWideKey);
-      } catch (_) {
-        final legacyKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
-        return await _encryption.decryptData(encryptedData, legacyKey);
-      }
+      // Strict: only username-based shared key
+      final usernameForKey = await _backupService.getCurrentUsernameFolder();
+      final userKey = await _encryption.deriveEncryptionKey(usernameForKey, usernameForKey);
+      return await _encryption.decryptData(encryptedData, userKey);
     } catch (e) {
       throw RestoreException(
         'Failed to decrypt backup data: ${e.toString()}',

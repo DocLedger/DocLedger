@@ -1,210 +1,305 @@
 import 'package:flutter/material.dart';
-
-import '../../patients/presentation/pages/patient_list_page.dart';
-import '../../../core/services/service_locator.dart';
 import '../../../core/data/repositories/data_repository.dart';
+import '../../../core/services/service_locator.dart';
 import '../../../core/data/models/data_models.dart' as models;
 
-/// Main dashboard with bottom navigation and quick actions
-class DashboardPage extends StatefulWidget {
-  static const String routeName = '/dashboard';
-
-  final bool embedded; // when true, render content without bottom navigation
-
+class DashboardPage extends StatelessWidget {
+  final bool embedded; // true when placed inside shells which provide chrome
   const DashboardPage({super.key, this.embedded = false});
-
-  @override
-  State<DashboardPage> createState() => _DashboardPageState();
-}
-
-class _DashboardPageState extends State<DashboardPage> {
-  int _index = 0;
-
-  late final List<Widget> _pages;
-
-  @override
-  void initState() {
-    super.initState();
-    _pages = const [
-      _HomeTab(),
-      PatientListPage(),
-    ];
-  }
+  static const String routeName = '/dashboard';
 
   @override
   Widget build(BuildContext context) {
-    if (widget.embedded) {
-      // When embedded inside another Scaffold (desktop or mobile shells), return the content directly
-      return const _HomeTab();
+    final repo = serviceLocator.get<DataRepository>();
+    final width = MediaQuery.sizeOf(context).width;
+    final isCompact = width < 900;
+    final isVeryCompact = width < 520;
+
+  // Single metrics list card that combines the three small boxes into one.
+  // If height is null, the card will size to its content (removes extra whitespace).
+  Widget metricsListCard({double? height}) {
+      return FutureBuilder<List<dynamic>>(
+        future: Future.wait([
+          repo.getPatientCount(),
+          repo.getTodayVisitCount(),
+          repo.getPendingFollowUpsCount(),
+        ]),
+        builder: (context, snapshot) {
+          final data = snapshot.data;
+          final patients = data != null ? data[0] as int : 0;
+          final todayVisits = data != null ? data[1] as int : 0;
+          final pendingFollowUps = data != null ? data[2] as int : 0;
+
+          // A single-row metric: icon + title on the left, number on the right.
+      Widget metricRow(String title, String value, IconData icon) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(icon, color: Theme.of(context).colorScheme.primary),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(fontSize: 15),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      value,
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
+              );
+
+          // Build rows with dividers using a Column sized to content.
+          final rows = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              metricRow('Total Patients', patients.toString(), Icons.people),
+              const Divider(height: 0),
+              metricRow("Patient Visits Today", todayVisits.toString(), Icons.event_available),
+              const Divider(height: 0),
+              metricRow('Follow-ups (7d)', pendingFollowUps.toString(), Icons.schedule),
+            ],
+          );
+            // Build rows for compact (content-sized) layout.
+            final compactRows = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                metricRow('Total Patients', patients.toString(), Icons.people),
+                const Divider(height: 1, thickness: 1),
+                metricRow("Patient Visits Today", todayVisits.toString(), Icons.event_available),
+                const Divider(height: 1, thickness: 1),
+                metricRow('Follow-ups (7d)', pendingFollowUps.toString(), Icons.schedule),
+              ],
+            );
+
+            // Build rows for fixed-height layout (wide screens): expand rows to fill height evenly.
+            final stretchedRows = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: metricRow('Total Patients', patients.toString(), Icons.people)),
+                const Divider(height: 1, thickness: 1),
+                Expanded(child: metricRow("Patient Visits Today", todayVisits.toString(), Icons.event_available)),
+                const Divider(height: 1, thickness: 1),
+                Expanded(child: metricRow('Follow-ups (7d)', pendingFollowUps.toString(), Icons.schedule)),
+              ],
+            );
+
+            return _DashboardCard(
+              child: height == null
+                  ? compactRows
+                  : SizedBox(height: height, child: stretchedRows),
+            );
+        },
+      );
+    }
+
+    Widget body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Dashboard', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+            _SyncStatusIcon(repo: repo),
+          ],
+        ),
+        const SizedBox(height: 12),
+  if (isCompact) ...[
+    // Compact screens (Android): Metrics first, then Today, then the remaining two boxes.
+    metricsListCard(),
+    const SizedBox(height: 12),
+    _DashboardCard(
+            child: SizedBox(
+              height: 240,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle('Today'),
+                  const SizedBox(height: 8),
+      _TodayFollowUpsList(repo: repo, embedded: true),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _DashboardCard(
+            child: SizedBox(
+              height: 240,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle('Upcoming Follow-ups'),
+                  const SizedBox(height: 8),
+      _UpcomingList(repo: repo, embedded: true),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _DashboardCard(
+            child: SizedBox(
+              height: 240,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle('Recent Patients'),
+                  const SizedBox(height: 8),
+                  _RecentPatientsList(repo: repo, embedded: true),
+                ],
+              ),
+            ),
+          ),
+        ] else ...[
+          // Wide screens: First row has Metrics (left) and Today (right), both at a compact equal height. Next row has the two remaining boxes.
+          Column(
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 1,
+                    child: metricsListCard(height: 240),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 1,
+                    child: _DashboardCard(
+                      child: SizedBox(
+                        height: 240,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionTitle('Today'),
+                            const SizedBox(height: 8),
+                            Expanded(child: _TodayFollowUpsList(repo: repo)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _DashboardCard(
+                      child: SizedBox(
+                        height: 260,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionTitle('Upcoming Follow-ups'),
+                            const SizedBox(height: 8),
+                            Expanded(child: _UpcomingList(repo: repo)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _DashboardCard(
+                      child: SizedBox(
+                        height: 260,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _SectionTitle('Recent Patients'),
+                            const SizedBox(height: 8),
+                            Expanded(child: _RecentPatientsList(repo: repo)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 16),
+      ],
+    );
+
+    if (embedded) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: body,
+      );
     }
     return Scaffold(
-      body: _pages[_index],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: 'Patients'),
-        ],
-        onDestinationSelected: (i) => setState(() => _index = i),
-      ),
+      appBar: AppBar(title: const Text('Dashboard')),
+      body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: body),
     );
   }
 }
 
-class _HomeTab extends StatelessWidget {
-  const _HomeTab();
+class _TodayFollowUpsList extends StatelessWidget {
+  final DataRepository repo;
+  final bool embedded;
+  const _TodayFollowUpsList({required this.repo, this.embedded = false});
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme;
-    final repo = serviceLocator.get<DataRepository>();
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isCompact = constraints.maxWidth < 700;
-        final isVeryCompact = constraints.maxWidth < 380;
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 12),
-              FutureBuilder<List<dynamic>>(
-          future: Future.wait([
-            repo.getPatientCount(),
-            repo.getTodayVisitCount(),
-            repo.getThisMonthRevenue(),
-            repo.getPendingFollowUpsCount(),
-          ]),
-          builder: (context, snapshot) {
-            final data = snapshot.data;
-            final patients = data != null ? data[0] as int : 0;
-            final todayVisits = data != null ? data[1] as int : 0;
-            final monthRevenue = data != null ? data[2] as double : 0.0;
-            final pendingFollowUps = data != null ? data[3] as int : 0;
-            Widget buildMetric(String title, String value, IconData icon) {
-              final content = _MetricTile(
-                title: title,
-                value: value,
-                icon: icon,
-                obscureInitially: title.startsWith('This Month Revenue'),
-              );
-              return _DashboardCard(
-                child: SizedBox(
-                  height: isCompact ? 128 : 140,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: content,
-                  ),
-                ),
-              );
-            }
-            final tiles = <Widget>[
-              buildMetric('Total Patients (All Time)', patients.toString(), Icons.people),
-              buildMetric("Today's Patient Visits ", todayVisits.toString(), Icons.event_available),
-              buildMetric('This Month Revenue', 'Rs.${monthRevenue.toStringAsFixed(0)}', Icons.payments),
-              buildMetric('Follow-ups (7 days)', pendingFollowUps.toString(), Icons.schedule),
-            ];
-            if (isCompact) {
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: isVeryCompact ? 1 : 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  mainAxisExtent: 132,
-                ),
-                itemCount: tiles.length,
-                itemBuilder: (_, i) => tiles[i],
-              );
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: tiles[0]),
-                const SizedBox(width: 12),
-                Expanded(child: tiles[1]),
-                const SizedBox(width: 12),
-                Expanded(child: tiles[2]),
-                const SizedBox(width: 12),
-                Expanded(child: tiles[3]),
-              ],
+    final today = DateUtils.dateOnly(DateTime.now());
+    return FutureBuilder<List<dynamic>>(
+      future: repo.getUpcomingFollowUps(limit: 12),
+      builder: (context, snapshot) {
+        final items = (snapshot.data ?? const <dynamic>[]) as List;
+        final filtered = items.whereType<models.Visit>().where((v) {
+          final d = DateUtils.dateOnly(v.followUpDate ?? v.visitDate);
+          return d == today;
+        }).toList();
+        if (filtered.isEmpty) {
+          return const Center(child: Text('No follow-ups today'));
+        }
+        final list = ListView.separated(
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
+          itemCount: filtered.length,
+          separatorBuilder: (_, __) => const Divider(height: 8),
+          itemBuilder: (context, i) {
+            final v = filtered[i];
+            return FutureBuilder<models.Patient?>(
+              future: serviceLocator.get<DataRepository>().getPatient(v.patientId),
+              builder: (context, snap) {
+                final name = (snap.data?.name ?? '').trim();
+                final diag = (v.diagnosis ?? 'Visit').trim();
+                final left = name.isNotEmpty ? '$name • $diag' : diag;
+                return Row(
+                  children: [
+                    const Icon(Icons.today, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(left, style: const TextStyle(fontSize: 15), overflow: TextOverflow.ellipsis)),
+                    Text(_time(v.followUpDate ?? v.visitDate)),
+                  ],
+                );
+              },
             );
           },
-        ),
-              const SizedBox(height: 12),
-              if (isCompact)
-                Column(
-                  children: [
-                    _DashboardCard(
-                      child: SizedBox(
-                        height: 220,
-                        child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const _SectionTitle('Upcoming Follow-ups'),
-                          const SizedBox(height: 8),
-                          _UpcomingList(repo: repo, embedded: true),
-                        ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _DashboardCard(
-                      child: SizedBox(
-                        height: 220,
-                        child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const _SectionTitle('Recent Patients'),
-                          const SizedBox(height: 8),
-                          _RecentPatientsList(repo: repo, embedded: true),
-                        ],
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              else
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: _DashboardCard(
-                        child: SizedBox(
-                          height: 260,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const _SectionTitle('Upcoming Follow-ups'),
-                              const SizedBox(height: 8),
-                              Expanded(child: _UpcomingList(repo: repo)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _DashboardCard(
-                        child: SizedBox(
-                          height: 260,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const _SectionTitle('Recent Patients'),
-                              const SizedBox(height: 8),
-                              Expanded(child: _RecentPatientsList(repo: repo)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              const SizedBox(height: 16),
-            ],
-          ),
+        );
+        return MediaQuery.removePadding(
+          context: context,
+          removeTop: true,
+          removeBottom: true,
+          child: list,
         );
       },
     );
@@ -213,23 +308,33 @@ class _HomeTab extends StatelessWidget {
 
 class _UpcomingList extends StatelessWidget {
   final DataRepository repo;
-  final bool embedded; // when true, let parent scroll handle; no internal scroll
+  final bool embedded;
   const _UpcomingList({required this.repo, this.embedded = false});
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
+    return FutureBuilder<List<dynamic>>(
       future: repo.getUpcomingFollowUps(limit: 6),
       builder: (context, snapshot) {
         final items = snapshot.data ?? const <dynamic>[];
         if (items.isEmpty) {
           return const Center(child: Text('No upcoming follow-ups'));
         }
+        final tomorrow = DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
+        final filtered = (items as List)
+            .whereType<models.Visit>()
+            .where((v) => DateUtils.dateOnly(v.followUpDate ?? v.visitDate).isAfter(tomorrow.subtract(const Duration(days: 1))))
+            .toList();
+        if (filtered.isEmpty) {
+          return const Center(child: Text('No upcoming follow-ups'));
+        }
         final list = ListView.separated(
-          itemCount: items.length,
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
+          itemCount: filtered.length,
           separatorBuilder: (_, __) => const Divider(height: 8),
           itemBuilder: (context, i) {
-            final v = items[i] as models.Visit;
+            final v = filtered[i];
             return FutureBuilder<models.Patient?>(
               future: serviceLocator.get<DataRepository>().getPatient(v.patientId),
               builder: (context, snap) {
@@ -248,18 +353,12 @@ class _UpcomingList extends StatelessWidget {
             );
           },
         );
-        if (embedded) {
-          return MediaQuery.removePadding(
-            context: context,
-            removeTop: true,
-            removeBottom: true,
-            child: SizedBox(
-              height: (items.length * 44) + 8, // approximate row height
-              child: list,
-            ),
-          );
-        }
-        return list;
+        return MediaQuery.removePadding(
+          context: context,
+          removeTop: true,
+          removeBottom: true,
+          child: list,
+        );
       },
     );
   }
@@ -272,7 +371,7 @@ class _RecentPatientsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
+    return FutureBuilder<List<dynamic>>(
       future: repo.getRecentPatients(limit: 6),
       builder: (context, snapshot) {
         final items = snapshot.data ?? const <dynamic>[];
@@ -280,7 +379,9 @@ class _RecentPatientsList extends StatelessWidget {
           return const Center(child: Text('No recent patients'));
         }
         final list = ListView.separated(
-          itemCount: items.length,
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
+          itemCount: (items as List).length,
           separatorBuilder: (_, __) => const Divider(height: 8),
           itemBuilder: (context, i) {
             final p = items[i] as models.Patient;
@@ -294,81 +395,13 @@ class _RecentPatientsList extends StatelessWidget {
             );
           },
         );
-        if (embedded) {
-          return MediaQuery.removePadding(
-            context: context,
-            removeTop: true,
-            removeBottom: true,
-            child: SizedBox(
-              height: (items.length * 44) + 8,
-              child: list,
-            ),
-          );
-        }
-        return list;
+        return MediaQuery.removePadding(
+          context: context,
+          removeTop: true,
+          removeBottom: true,
+          child: list,
+        );
       },
-    );
-  }
-}
-
-class _ActionCard extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _ActionCard({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: color.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 8),
-              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _KpiTile extends StatelessWidget {
-  final String title;
-  final String value;
-  const _KpiTile({required this.title, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: 6),
-          Text(value, style: Theme.of(context).textTheme.headlineSmall),
-        ],
-      ),
     );
   }
 }
@@ -398,27 +431,6 @@ class _DashboardCard extends StatelessWidget {
   }
 }
 
-class _VitalMiniCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final Color color;
-  const _VitalMiniCard({required this.title, required this.value, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return _DashboardCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-          const Spacer(),
-          Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: color)),
-        ],
-      ),
-    );
-  }
-}
-
 class _SectionTitle extends StatelessWidget {
   final String text;
   const _SectionTitle(this.text);
@@ -431,106 +443,93 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _MetricTile extends StatefulWidget {
+class _MetricTile extends StatelessWidget {
   final String title;
   final String value;
   final IconData icon;
-  final bool obscureInitially;
-  const _MetricTile({required this.title, required this.value, required this.icon, this.obscureInitially = false});
-
-  @override
-  State<_MetricTile> createState() => _MetricTileState();
-}
-
-class _MetricTileState extends State<_MetricTile> {
-  late bool _obscure;
-
-  @override
-  void initState() {
-    super.initState();
-    _obscure = widget.obscureInitially;
-  }
+  const _MetricTile({required this.title, required this.value, required this.icon});
 
   @override
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme;
-    const double _iconBox = 40;
-    const double _gap = 12;
-    final String displayValue = _obscure ? '******' : widget.value;
-    return GestureDetector(
-      onTap: widget.obscureInitially
-          ? () => setState(() => _obscure = !_obscure)
-          : null,
-      child: SizedBox.expand(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  width: _iconBox,
-                  height: _iconBox,
-                  decoration: BoxDecoration(
-                    color: color.primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Center(child: Icon(widget.icon, color: color.primary)),
+    const double iconBox = 40;
+    const double gap = 12;
+    return SizedBox.expand(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: iconBox,
+                height: iconBox,
+                decoration: BoxDecoration(
+                  color: color.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(width: _gap),
-                Expanded(
-                  child: Text(
-                    widget.title,
-                    style: const TextStyle(color: Colors.grey, fontSize: 15),
-                    maxLines: 2,
-                    softWrap: true,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Padding(
-              padding: const EdgeInsets.only(left: _iconBox + _gap),
-              child: Text(
-                displayValue,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
+                child: Center(child: Icon(icon, color: color.primary)),
               ),
+              const SizedBox(width: gap),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(color: Colors.grey, fontSize: 15),
+                  maxLines: 2,
+                  softWrap: true,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.only(left: iconBox + gap),
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _NestedScrollContainer extends StatelessWidget {
-  final Widget child;
-  const _NestedScrollContainer({required this.child});
+class _SyncStatusIcon extends StatelessWidget {
+  final DataRepository repo;
+  const _SyncStatusIcon({required this.repo});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Keep the immediate title spacing consistent
-        const SizedBox(height: 0),
-        Expanded(
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (n) {
-              // Let parent scroll when inner list hits edges
-              return false;
-            },
-            child: child,
+    return FutureBuilder<int>(
+      future: repo.getPendingSyncCount(),
+      builder: (context, snapshot) {
+        final pending = snapshot.data ?? 0;
+        final color = pending == 0 ? Colors.green : Colors.orange;
+        return Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
+            border: Border.all(color: color.withValues(alpha: 0.3)),
           ),
-        ),
-      ],
+          child: Icon(pending == 0 ? Icons.cloud_done : Icons.cloud_upload, color: color, size: 20),
+        );
+      },
     );
   }
 }
 
 String _date(DateTime d) => '${d.day}/${d.month}/${d.year}';
+String _time(DateTime d) {
+  final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
+  final m = d.minute.toString().padLeft(2, '0');
+  final ampm = d.hour < 12 ? 'AM' : 'PM';
+  return '$h:$m $ampm';
+}
 

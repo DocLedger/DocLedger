@@ -30,6 +30,22 @@ class AppTheme {
       colorScheme: colorScheme,
       scaffoldBackgroundColor: _background,
       cardColor: _card,
+      filledButtonTheme: FilledButtonThemeData(
+        style: ButtonStyle(
+          padding: WidgetStateProperty.resolveWith<EdgeInsetsGeometry?>((_) => const EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: ButtonStyle(
+          padding: WidgetStateProperty.resolveWith<EdgeInsetsGeometry?>((_) => const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: ButtonStyle(
+          padding: WidgetStateProperty.resolveWith<EdgeInsetsGeometry?>((_) => const EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+          foregroundColor: WidgetStateProperty.resolveWith<Color?>((states) => colorScheme.primary),
+        ),
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: _background,
         foregroundColor: colorScheme.onSurface,

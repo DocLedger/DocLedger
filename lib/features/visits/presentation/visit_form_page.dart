@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/compact_date_time_picker.dart';
 import '../../../core/data/models/data_models.dart' as models;
 import '../../../core/services/service_locator.dart';
 import '../../../core/data/repositories/data_repository.dart';
@@ -19,6 +20,7 @@ class _VisitFormPageState extends State<VisitFormPage> {
   final _notes = TextEditingController();
   final _fee = TextEditingController();
   DateTime? _followUpDate;
+  TimeOfDay? _followUpTime;
 
   @override
   void dispose() {
@@ -58,15 +60,41 @@ class _VisitFormPageState extends State<VisitFormPage> {
               decoration: const InputDecoration(labelText: 'Fee'),
             ),
             const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Follow-up date'),
-              subtitle: Text(_followUpDate != null ? _formatDate(_followUpDate!) : 'Not set'),
-              trailing: IconButton(
-                icon: const Icon(Icons.calendar_month),
-                onPressed: _pickFollowUp,
-              ),
-            ),
+            // Follow-up picker: combined date & time (responsive layout)
+            LayoutBuilder(builder: (context, c) {
+              final dt = _followUpDate != null
+                  ? DateTime(
+                      _followUpDate!.year,
+                      _followUpDate!.month,
+                      _followUpDate!.day,
+                      (_followUpTime ?? TimeOfDay.now()).hour,
+                      (_followUpTime ?? TimeOfDay.now()).minute,
+                    )
+                  : null;
+              final dateLabel = dt != null ? _formatDate(dt) : 'Select date & time';
+              final row = Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickFollowUpDateTime,
+                      icon: const Icon(Icons.calendar_month),
+                      label: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(dateLabel, overflow: TextOverflow.ellipsis),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Follow-up'),
+                  const SizedBox(height: 8),
+                  row,
+                ],
+              );
+            }),
             const SizedBox(height: 12),
             TextFormField(
               controller: _notes,
@@ -84,15 +112,30 @@ class _VisitFormPageState extends State<VisitFormPage> {
     );
   }
 
-  Future<void> _pickFollowUp() async {
+  Future<void> _pickFollowUpDateTime() async {
     final now = DateTime.now();
-    final date = await showDatePicker(
+    final initial = _followUpDate != null
+        ? DateTime(
+            _followUpDate!.year,
+            _followUpDate!.month,
+            _followUpDate!.day,
+            (_followUpTime ?? TimeOfDay.now()).hour,
+            (_followUpTime ?? TimeOfDay.now()).minute,
+          )
+        : now;
+    final picked = await showCompactDateTimePicker(
       context: context,
-      initialDate: _followUpDate ?? now,
-      firstDate: now.subtract(const Duration(days: 1)),
+      initialDateTime: initial,
+      firstDate: now.subtract(const Duration(days: 365)),
       lastDate: now.add(const Duration(days: 365 * 2)),
+      title: 'Select follow-up',
     );
-    if (date != null) setState(() => _followUpDate = date);
+    if (picked != null) {
+      setState(() {
+        _followUpDate = DateUtils.dateOnly(picked);
+        _followUpTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
+      });
+    }
   }
 
   Future<void> _save() async {
@@ -106,7 +149,15 @@ class _VisitFormPageState extends State<VisitFormPage> {
       prescriptions: _prescriptions.text.trim().isEmpty ? null : _prescriptions.text.trim(),
       notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
       fee: _fee.text.trim().isEmpty ? null : double.tryParse(_fee.text.trim()),
-      followUpDate: _followUpDate,
+      followUpDate: _followUpDate != null
+          ? DateTime(
+              _followUpDate!.year,
+              _followUpDate!.month,
+              _followUpDate!.day,
+              (_followUpTime ?? TimeOfDay.now()).hour,
+              (_followUpTime ?? TimeOfDay.now()).minute,
+            )
+          : null,
       lastModified: DateTime.now(),
       deviceId: 'this_device',
       syncStatus: 'pending',

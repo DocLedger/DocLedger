@@ -3,22 +3,68 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 import '../models/sync_exceptions.dart';
-import '../models/sync_models.dart';
-import '../../cloud/services/google_drive_service.dart';
+import '../../cloud/services/webdav_backup_service.dart';
 import '../../encryption/services/encryption_service.dart';
+
+/// Minimal result models to decouple from removed sync_models.dart
+class SyncResult {
+  final bool success;
+  final bool requiresReauth;
+  final String? message;
+  final dynamic error;
+  final Duration? retryAfter;
+
+  const SyncResult._({
+    required this.success,
+    this.requiresReauth = false,
+    this.message,
+    this.error,
+    this.retryAfter,
+  });
+
+  factory SyncResult.success({String? message}) => SyncResult._(success: true, message: message);
+  factory SyncResult.error(SyncException error) => SyncResult._(success: false, error: error);
+  factory SyncResult.requiresReauth({String? message, SyncException? error}) => SyncResult._(success: false, requiresReauth: true, message: message, error: error);
+  factory SyncResult.retry({required Duration retryAfter, SyncException? error}) => SyncResult._(success: false, error: error, retryAfter: retryAfter);
+  factory SyncResult.deferred(String message) => SyncResult._(success: false, message: message);
+  factory SyncResult.cancelled() => const SyncResult._(success: false, message: 'Cancelled');
+  factory SyncResult.withError(SyncException error) => SyncResult._(success: false, error: error);
+}
+
+class RestoreResult {
+  final bool success;
+  final String? message;
+  final int? restoredRecords;
+  final SyncException? error;
+
+  const RestoreResult._({
+    required this.success,
+    this.message,
+    this.restoredRecords,
+    this.error,
+  });
+
+  factory RestoreResult.withSuccess({required String message, int? restoredRecords}) {
+    return RestoreResult._(success: true, message: message, restoredRecords: restoredRecords);
+  }
+
+  factory RestoreResult.withError(SyncException error) {
+    return RestoreResult._(success: false, error: error, message: error.message);
+  }
+}
 
 /// Handles data integrity issues and corruption scenarios
 class DataIntegrityHandler {
-  final GoogleDriveService _driveService;
+  final WebDavBackupService _backupService;
   final EncryptionService _encryptionService;
 
-  DataIntegrityHandler(this._driveService, this._encryptionService);
+  DataIntegrityHandler(this._backupService, this._encryptionService);
 
   /// Handles corrupted backup files by attempting recovery
-  Future<RestoreResult> handleCorruptedBackup(String backupFileId, String clinicId) async {
+  Future<RestoreResult> handleCorruptedBackup(String backupFilePath, String clinicId) async {
     try {
       // Try to download and validate the backup file
-      final backupData = await _driveService.downloadBackupFile(backupFileId);
+      final backupData = await _backupService.downloadBackupFile(backupFilePath);
       
       // Attempt to decrypt and validate
       final decryptedData = await _attemptDecryption(backupData, clinicId);
@@ -226,22 +272,22 @@ class DataIntegrityHandler {
 
   Future<RestoreResult> _tryPreviousBackups(String clinicId) async {
     try {
-      final backupFiles = await _driveService.listBackupFiles();
+      final files = await _backupService.listBackups(clinicId);
       
-      // Sort by creation time, newest first
-      backupFiles.sort((a, b) => b.createdTime!.compareTo(a.createdTime!));
+      // Sort by modification time, newest first
+      files.sort((a, b) => b.modifiedTime.compareTo(a.modifiedTime));
       
       // Skip the first one (current corrupted backup) and try others
-      for (int i = 1; i < backupFiles.length; i++) {
+      for (int i = 1; i < files.length; i++) {
         try {
-          final backupData = await _driveService.downloadBackupFile(backupFiles[i].id!);
+          final backupData = await _backupService.downloadBackupFile(files[i].path);
           final decryptedData = await _attemptDecryption(backupData, clinicId);
           
           if (decryptedData != null) {
             final isValid = await _validateBackupIntegrity(decryptedData);
             if (isValid) {
               return RestoreResult.withSuccess(
-                message: 'Restored from backup ${i + 1} (${backupFiles[i].name})',
+                message: 'Restored from backup ${i + 1} (${files[i].path.split('/').last})',
                 restoredRecords: _countRecords(decryptedData),
               );
             }

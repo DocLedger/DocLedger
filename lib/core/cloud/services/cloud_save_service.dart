@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../models/cloud_save_models.dart';
 import '../../data/models/data_models.dart';
 import '../../data/services/database_service.dart';
-import 'google_drive_service.dart';
 import '../../encryption/services/encryption_service.dart';
 import '../../encryption/models/encryption_models.dart';
+import 'webdav_backup_service.dart';
 
 /// Exception thrown when cloud save operations fail
 class CloudSaveException implements Exception {
@@ -24,13 +25,13 @@ class CloudSaveException implements Exception {
 /// Simplified cloud save service that replaces complex sync/backup system
 /// 
 /// This service provides a single "auto-save to cloud" functionality that:
-/// - Automatically saves data changes to Google Drive
+/// - Automatically saves data changes to cloud storage
 /// - Uses simple timestamp-based conflict resolution
 /// - Encrypts all data by default
 /// - Provides clear status updates to users
 class CloudSaveService {
   final DatabaseService _database;
-  final GoogleDriveService _driveService;
+  final WebDavBackupService _backup;
   final EncryptionService _encryption;
   
   // Configuration
@@ -62,12 +63,12 @@ class CloudSaveService {
   
   CloudSaveService({
     required DatabaseService database,
-    required GoogleDriveService driveService,
+    required WebDavBackupService backupService,
     required EncryptionService encryption,
     required String clinicId,
     required String deviceId,
   }) : _database = database,
-       _driveService = driveService,
+       _backup = backupService,
        _encryption = encryption,
        _clinicId = clinicId,
        _deviceId = deviceId;
@@ -87,6 +88,9 @@ class CloudSaveService {
   /// Whether notifications are enabled
   bool get showNotifications => _showNotifications;
 
+  // Public accessor for clinic id
+  String get clinicId => _clinicId;
+
   /// Dispose resources
   void dispose() {
     _autoSaveTimer?.cancel();
@@ -99,13 +103,18 @@ class CloudSaveService {
     try {
       // Load saved settings
       await _loadSettings();
+      // If not linked, keep auto-save disabled to avoid unnecessary attempts
+      if (!await _backup.isReady()) {
+        _autoSaveEnabled = false;
+      }
+      _log('initialize: autoSaveEnabled=' + _autoSaveEnabled.toString());
       
       // Set initial state
       final lastSaveTime = await _getLastSaveTime();
       _updateState(CloudSaveState.idle(lastSaveTime: lastSaveTime));
       
-      // Start listening for data changes if auto-save is enabled
-      if (_autoSaveEnabled) {
+      // Start listening for data changes if auto-save is enabled and account is linked
+      if (_autoSaveEnabled && await _backup.isReady()) {
         _startAutoSaveListener();
       }
       // Schedule periodic sync check
@@ -131,23 +140,35 @@ class CloudSaveService {
   /// Refresh whether local and cloud are out of sync
   Future<void> refreshSyncStatus() async {
     try {
-      if (!_driveService.isAuthenticated) {
+      if (!await _backup.isReady()) {
         _shouldEnableSync = false;
+        _log('refreshSyncStatus: not linked');
         return;
       }
-      final latest = await _driveService.getLatestBackup();
+      // Consider any .enc backup under the user folder
+      var latest = await _backup.getLatestBackup(null);
+      // Fallback: list all and take most recent if direct latest lookup fails
+      if (latest == null) {
+        final all = await _backup.listBackups(null);
+        if (all.isNotEmpty) {
+          latest = all.first;
+        }
+      }
       final lastSaveTime = await _getLastSaveTime();
       if (latest == null) {
         // No cloud backup yet: enable sync if we have data
         _shouldEnableSync = true;
+        _log('refreshSyncStatus: no cloud backup found; enabling sync');
         return;
       }
       if (lastSaveTime == null) {
         _shouldEnableSync = true;
+        _log('refreshSyncStatus: have cloud backup, local has no lastSaveTime; enabling sync');
         return;
       }
-      // Enable if drive newer than local or local changed since last save
+      // Enable if cloud newer than local or local changed since last save
       _shouldEnableSync = latest.modifiedTime.isAfter(lastSaveTime);
+      _log('refreshSyncStatus: cloud=' + latest.modifiedTime.toIso8601String() + ' local=' + lastSaveTime.toIso8601String() + ' enable=' + _shouldEnableSync.toString());
     } catch (_) {
       _shouldEnableSync = false;
     }
@@ -157,17 +178,33 @@ class CloudSaveService {
   Future<CloudSaveResult> syncNow() async {
     try {
       await refreshSyncStatus();
-      if (!_driveService.isAuthenticated) {
-        return CloudSaveResult.failure('Google account not linked');
+      if (!await _backup.isReady()) {
+        _log('syncNow: not linked');
+        return CloudSaveResult.failure('Not linked to cloud storage');
       }
-      final latest = await _driveService.getLatestBackup();
+      // Consider any .enc backup under the user folder
+      var latest = await _backup.getLatestBackup(null);
+      if (latest == null) {
+        final all = await _backup.listBackups(null);
+        if (all.isNotEmpty) {
+          latest = all.first;
+        }
+      }
       final lastSaveTime = await _getLastSaveTime();
       if (latest == null) {
+        // No cloud backup detected: avoid creating an empty backup if local DB is empty
+        if (!await _hasAnyLocalData()) {
+          _log('syncNow: no cloud backup and local empty -> failure');
+          return CloudSaveResult.failure('No cloud backup found to restore');
+        }
+        _log('syncNow: no cloud backup but local has data -> save');
         return await saveNow();
       }
       if (lastSaveTime == null || latest.modifiedTime.isAfter(lastSaveTime)) {
+        _log('syncNow: restoring (cloud newer or no local timestamp). cloud=' + latest.modifiedTime.toIso8601String() + ' local=' + (lastSaveTime?.toIso8601String() ?? 'null'));
         return await restoreFromCloud();
       }
+      _log('syncNow: saving (local up-to-date). cloud=' + latest.modifiedTime.toIso8601String() + ' local=' + lastSaveTime.toIso8601String());
       return await saveNow();
     } catch (e) {
       return CloudSaveResult.failure(e.toString());
@@ -203,22 +240,17 @@ class CloudSaveService {
     final stopwatch = Stopwatch()..start();
     
     try {
+      _log('saveNow: start');
       _updateState(CloudSaveState.saving(currentOperation: 'Starting save'));
       
       // Check authentication
-      if (!_driveService.isAuthenticated) {
-        throw CloudSaveException(
-          'Google account not linked',
-          code: 'AUTH_REQUIRED',
-        );
+      if (!await _backup.isReady()) {
+        throw CloudSaveException('Not linked to cloud storage', code: 'AUTH_REQUIRED');
       }
       
       // Check WiFi requirement
       if (_wifiOnlyMode && !await _isOnWiFi()) {
-        throw CloudSaveException(
-          'WiFi required for cloud save',
-          code: 'WIFI_REQUIRED',
-        );
+        throw CloudSaveException('WiFi required for cloud save', code: 'WIFI_REQUIRED');
       }
       
       // Step 1: Export current data
@@ -228,6 +260,16 @@ class CloudSaveService {
       ));
       
       final snapshot = await _database.exportDatabaseSnapshot();
+      try {
+        final tables = snapshot['tables'] as Map<String, dynamic>?;
+        int total = 0;
+        if (tables != null) {
+          for (final name in _syncTables) {
+            total += (tables[name] as List?)?.length ?? 0;
+          }
+        }
+        _log('saveNow: exported snapshot with ' + total.toString() + ' records');
+      } catch (_) {}
       
       // Step 2: Create save data structure
       _updateState(CloudSaveState.saving(
@@ -246,27 +288,33 @@ class CloudSaveService {
       );
       
       // Step 3: Encrypt data
-      // Use clinic-wide key to keep backups restorable across devices of same clinic
-      final encryptionKey = await _encryption.deriveEncryptionKey(_clinicId, _clinicId);
+      // Use username-based shared key so any device logged as the same user can decrypt
+      final usernameFolder = await _backup.getCurrentUsernameFolder();
+      final encryptionKey = await _encryption.deriveEncryptionKey(usernameFolder, usernameFolder);
       final encryptedData = await _encryption.encryptData(saveData.toJson(), encryptionKey);
       final payloadBytes = utf8.encode(jsonEncode(encryptedData.toJson()));
       
-      // Step 4: Upload to Google Drive
+      // Step 4: Upload to cloud
       _updateState(CloudSaveState.saving(
         progress: 0.6,
         currentOperation: 'Uploading to cloud',
       ));
       
-      final fileName = _generateSaveFileName();
-      final fileId = await _driveService.uploadBackupFile(
-        fileName,
-        payloadBytes,
-        onProgress: (transferred, total) {
-          final uploadProgress = 0.6 + (0.3 * (transferred / total));
+      final fileName = _generateSaveFileName(usernameFolder);
+      _log('saveNow: uploading file ' + fileName + ' to folder ' + usernameFolder);
+      await _backup.uploadBackupFile(
+        usernameFolder: usernameFolder,
+        fileName: fileName,
+        bytes: Uint8List.fromList(payloadBytes),
+        onProgress: (sent, total) {
+          final uploadProgress = 0.6 + (0.3 * (sent / total));
           _updateState(CloudSaveState.saving(
             progress: uploadProgress,
-            currentOperation: 'Uploading ($transferred/$total bytes)',
+            currentOperation: 'Uploading ($sent/$total bytes)',
           ));
+          if (sent == total) {
+            _log('saveNow: upload completed, size=' + total.toString());
+          }
         },
       );
       
@@ -276,17 +324,18 @@ class CloudSaveService {
         currentOperation: 'Cleaning up old saves',
       ));
       
-      await _cleanupOldSaves();
+      // Do not strictly filter by clinic id here; keep-by-count within user folder
+      await _backup.cleanupOldBackups(usernameFolder, keep: 10, clinicId: null);
       
       // Step 6: Update metadata
       await _updateSaveMetadata();
+      _log('saveNow: completed successfully');
       
       stopwatch.stop();
       
       final result = CloudSaveResult.success(
         duration: stopwatch.elapsed,
         metadata: {
-          'file_id': fileId,
           'file_name': fileName,
           'file_size': payloadBytes.length,
           'tables_saved': _syncTables.length,
@@ -327,14 +376,12 @@ class CloudSaveService {
     final stopwatch = Stopwatch()..start();
     
     try {
+      _log('restoreFromCloud: start');
       _updateState(CloudSaveState.restoring(currentOperation: 'Starting restore'));
       
       // Check authentication
-      if (!_driveService.isAuthenticated) {
-        throw CloudSaveException(
-          'Google account not linked',
-          code: 'AUTH_REQUIRED',
-        );
+      if (!await _backup.isReady()) {
+        throw CloudSaveException('Not linked to cloud storage', code: 'AUTH_REQUIRED');
       }
       
       // Step 1: Get latest save file
@@ -343,13 +390,25 @@ class CloudSaveService {
         currentOperation: 'Finding latest save',
       ));
       
-      final latestSave = await _driveService.getLatestBackup();
-      if (latestSave == null) {
-        throw CloudSaveException(
-          'No cloud saves found',
-          code: 'NO_SAVES_FOUND',
-        );
+      // Search latest backup within the logged-in username folder regardless of device-specific clinic id
+      var latest = await _backup.getLatestBackup(null);
+      if (latest == null) {
+        final all = await _backup.listBackups(null);
+        if (all.isNotEmpty) {
+          latest = all.first;
+        }
       }
+      if (latest == null) {
+        // Strict behavior: no legacy creation; notify via state and return failure
+        final msg = 'No cloud saves found';
+        _log('restoreFromCloud: ' + msg);
+        _updateState(CloudSaveState.error(msg));
+        if (_showNotifications) {
+          _showSaveNotification('Backup not found', isError: true);
+        }
+        return CloudSaveResult.failure(msg);
+      }
+      _log('restoreFromCloud: using file ' + latest.path + ' modified=' + latest.modifiedTime.toIso8601String());
       
       // Step 2: Download save file
       _updateState(CloudSaveState.restoring(
@@ -357,16 +416,16 @@ class CloudSaveService {
         currentOperation: 'Downloading from cloud',
       ));
       
-      final encryptedBytes = await _driveService.downloadBackupFile(
-        latestSave.id,
-        onProgress: (transferred, total) {
-          final downloadProgress = 0.2 + (0.4 * (transferred / total));
-          _updateState(CloudSaveState.restoring(
-            progress: downloadProgress,
-            currentOperation: 'Downloading ($transferred/$total bytes)',
-          ));
-        },
-      );
+      final encryptedBytes = await _backup.downloadBackupFile(latest.path, onProgress: (r, t) {
+        final downloadProgress = 0.2 + (0.4 * (r / t));
+        _updateState(CloudSaveState.restoring(
+          progress: downloadProgress,
+          currentOperation: 'Downloading ($r/$t bytes)',
+        ));
+        if (r == t) {
+          _log('restoreFromCloud: download completed, size=' + t.toString());
+        }
+      });
       
       // Step 3: Decrypt data
       _updateState(CloudSaveState.restoring(
@@ -375,22 +434,11 @@ class CloudSaveService {
       ));
       
       final parsed = jsonDecode(utf8.decode(encryptedBytes)) as Map<String, dynamic>;
-      // Try clinic-wide key first; fallback to legacy device-based key for compatibility
-      String encryptionKey = await _encryption.deriveEncryptionKey(_clinicId, _clinicId);
-      Map<String, dynamic> decryptedData;
-      try {
-        decryptedData = await _encryption.decryptData(
-          EncryptedData.fromJson(parsed),
-          encryptionKey,
-        );
-      } catch (_) {
-        // Fallback for older backups encrypted with device-based salt
-        final legacyKey = await _encryption.deriveEncryptionKey(_clinicId, _deviceId);
-        decryptedData = await _encryption.decryptData(
-          EncryptedData.fromJson(parsed),
-          legacyKey,
-        );
-      }
+      // Decrypt strictly with username-based shared key only
+      final usernameForKey = await _backup.getCurrentUsernameFolder();
+      final encryptionKey = await _encryption.deriveEncryptionKey(usernameForKey, usernameForKey);
+      final decryptedData = await _encryption.decryptData(EncryptedData.fromJson(parsed), encryptionKey);
+      _log('restoreFromCloud: decryption succeeded');
       
       // Step 4: Validate and parse save data
       _updateState(CloudSaveState.restoring(
@@ -398,9 +446,9 @@ class CloudSaveService {
         currentOperation: 'Validating data',
       ));
       
-      final saveData = CloudSaveData.fromJson(decryptedData);
+      final cloudData = CloudSaveData.fromJson(decryptedData);
       
-      if (!saveData.validateIntegrity()) {
+      if (!cloudData.validateIntegrity()) {
         throw CloudSaveException(
           'Cloud save data is corrupted',
           code: 'INTEGRITY_FAILED',
@@ -413,7 +461,8 @@ class CloudSaveService {
         currentOperation: 'Importing data',
       ));
       
-      await _importDataWithConflictResolution(saveData);
+      await _importDataWithConflictResolution(cloudData);
+      _log('restoreFromCloud: import completed');
       
       // Step 6: Update metadata
       _updateState(CloudSaveState.restoring(
@@ -422,15 +471,17 @@ class CloudSaveService {
       ));
       
       await _updateSaveMetadata();
+      _log('restoreFromCloud: metadata updated; success');
       
       stopwatch.stop();
       
       final result = CloudSaveResult.success(
         duration: stopwatch.elapsed,
         metadata: {
-          'save_timestamp': saveData.timestamp.toIso8601String(),
-          'save_device_id': saveData.deviceId,
-          'tables_restored': saveData.tables.length,
+          'save_timestamp': cloudData.timestamp.toIso8601String(),
+          // Show username provenance instead of device id to avoid confusion
+          'save_user': await _backup.getCurrentUsernameFolder(),
+          'tables_restored': cloudData.tables.length,
         },
       );
       
@@ -448,6 +499,7 @@ class CloudSaveService {
       stopwatch.stop();
       
       final errorMessage = e is CloudSaveException ? e.message : 'Restore failed: ${e.toString()}';
+      _log('restoreFromCloud: ERROR ' + errorMessage);
       
       _updateState(CloudSaveState.error(errorMessage));
       
@@ -460,6 +512,17 @@ class CloudSaveService {
         errorMessage,
         duration: stopwatch.elapsed,
       );
+    }
+  }
+
+  /// Check if any backup exists in cloud for this clinic
+  Future<bool> hasAnyCloudBackup() async {
+    try {
+      // Consider any .enc backup under the user folder as eligible
+      final latest = await _backup.getLatestBackup(null);
+      return latest != null;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -615,16 +678,33 @@ class CloudSaveService {
     return syncTables;
   }
 
-  /// Generates a save file name with timestamp
-  String _generateSaveFileName() {
+  /// Generates a user-scoped save file name with timestamp (user portable)
+  String _generateSaveFileName(String usernameFolder) {
     final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-');
-    return 'docledger_save_${_clinicId}_$timestamp.enc';
+    return 'docledger_save_${usernameFolder}_$timestamp.enc';
+  }
+
+  /// Heuristic: consider DB empty if exported snapshot has no rows in sync tables
+  Future<bool> _hasAnyLocalData() async {
+    try {
+      final snapshot = await _database.exportDatabaseSnapshot();
+      final tables = snapshot['tables'] as Map<String, dynamic>?;
+      if (tables == null) return false;
+      for (final name in _syncTables) {
+        final list = tables[name] as List?;
+        if (list != null && list.isNotEmpty) return true;
+      }
+      return false;
+    } catch (_) {
+      // If unsure, assume there is data to avoid blocking saves in normal flows
+      return true;
+    }
   }
 
   /// Cleans up old save files (keeps last 10)
   Future<void> _cleanupOldSaves() async {
     try {
-      await _driveService.deleteOldBackups();
+      await _backup.cleanupOldBackups(await _backup.getCurrentUsernameFolder(), keep: 10, clinicId: null);
     } catch (e) {
       // Non-critical error, log but don't fail the save operation
       print('Warning: Failed to cleanup old saves: $e');
@@ -633,9 +713,27 @@ class CloudSaveService {
 
   /// Checks if device is connected to WiFi
   Future<bool> _isOnWiFi() async {
-    // TODO: Implement WiFi check using connectivity_plus package
-    // For now, return true to not block saves
-    return true;
+    try {
+      final connectivity = Connectivity();
+      final dynamic res = await connectivity.checkConnectivity();
+      Iterable<ConnectivityResult> results;
+      if (res is List<ConnectivityResult>) {
+        results = res;
+      } else if (res is Set<ConnectivityResult>) {
+        results = res;
+      } else if (res is ConnectivityResult) {
+        results = [res];
+      } else {
+        results = const [];
+      }
+      // Accept WiFi; also accept Ethernet to avoid blocking desktop users
+      if (results.contains(ConnectivityResult.wifi)) return true;
+      if (results.contains(ConnectivityResult.ethernet)) return true;
+      return false;
+    } catch (_) {
+      // Fail-open to avoid blocking saves due to platform errors
+      return true;
+    }
   }
 
   /// Shows a save notification to the user
@@ -643,5 +741,17 @@ class CloudSaveService {
     // TODO: Implement notification system
     // This could use local notifications or in-app notifications
     print('CloudSave Notification: $message');
+  }
+
+  // Lightweight internal logger for debugging backup/restore flows
+  void _log(String message) {
+    // Prefix to make grepping logs easier
+    // Avoid throwing if print is unavailable in some contexts
+    try {
+      // Include a short timestamp for sequencing
+      final ts = DateTime.now().toIso8601String();
+      // ignore: avoid_print
+      print('[CloudSave] ' + ts + ' ' + message);
+    } catch (_) {}
   }
 }

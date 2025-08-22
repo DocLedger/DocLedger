@@ -44,6 +44,7 @@ abstract class DatabaseService {
   Future<int> getPatientCount();
   Future<int> getVisitCountBetween(DateTime from, DateTime to);
   Future<double> getRevenueTotalBetween(DateTime from, DateTime to);
+  Future<double> getBilledTotalBetween(DateTime from, DateTime to);
   Future<int> getPendingFollowUpsCountUntil(DateTime until);
   Future<List<Visit>> getUpcomingFollowUps({int limit = 5});
   Future<List<Patient>> getRecentPatients({int limit = 5});
@@ -460,6 +461,19 @@ class SQLiteDatabaseService implements DatabaseService {
   Future<double> getRevenueTotalBetween(DateTime from, DateTime to) async {
     final result = await database.rawQuery(
       'SELECT IFNULL(SUM(amount),0) as s FROM payments WHERE payment_date BETWEEN ? AND ?',
+      [from.toIso8601String(), to.toIso8601String()],
+    );
+    final value = result.first['s'];
+    if (value is int) return value.toDouble();
+    if (value is double) return value;
+    if (value is num) return value.toDouble();
+    return 0;
+  }
+
+  @override
+  Future<double> getBilledTotalBetween(DateTime from, DateTime to) async {
+    final result = await database.rawQuery(
+      'SELECT IFNULL(SUM(fee),0) as s FROM visits WHERE visit_date BETWEEN ? AND ?',
       [from.toIso8601String(), to.toIso8601String()],
     );
     final value = result.first['s'];

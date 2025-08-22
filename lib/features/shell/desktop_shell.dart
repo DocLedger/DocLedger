@@ -4,10 +4,9 @@ import 'package:flutter/services.dart';
 import '../dashboard/presentation/dashboard_page.dart' show DashboardPage; // reuse Home content
 import '../patients/presentation/pages/patient_list_page.dart';
 import '../settings/presentation/pages/settings_page.dart';
-import '../../core/cloud/services/google_drive_service.dart';
+import '../analytics/presentation/analytics_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 // Cloud save state not shown here; no need to import the service
-import '../../core/services/service_locator.dart';
 
 class DesktopShell extends StatefulWidget {
   static const String routeName = '/';
@@ -23,6 +22,7 @@ class _DesktopShellState extends State<DesktopShell> {
   late final List<Widget> _pages = const [
     DashboardPage(embedded: true),
     PatientListPage(),
+    AnalyticsPage(),
     SettingsPage(),
   ];
 
@@ -44,7 +44,7 @@ class _DesktopShellState extends State<DesktopShell> {
             return null;
           }),
           _GoSettingsIntent: CallbackAction<_GoSettingsIntent>(onInvoke: (i) {
-            setState(() => _index = 2);
+            setState(() => _index = 3);
             return null;
           }),
         },
@@ -81,12 +81,18 @@ class _DesktopShellState extends State<DesktopShell> {
                       selected: _index == 1,
                       onTap: () => setState(() => _index = 1),
                     ),
+                    _NavItem(
+                      icon: Icons.analytics,
+                      label: 'Analytics',
+                      selected: _index == 2,
+                      onTap: () => setState(() => _index = 2),
+                    ),
                     
                     _NavItem(
                       icon: Icons.settings,
                       label: 'Settings',
-                      selected: _index == 2,
-                      onTap: () => setState(() => _index = 2),
+                      selected: _index == 3,
+                      onTap: () => setState(() => _index = 3),
                     ),
                     const Spacer(),
                     _ProfileTile(),

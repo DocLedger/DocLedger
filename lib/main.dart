@@ -12,6 +12,7 @@ import 'theme/app_theme.dart';
 import 'features/patients/presentation/pages/patient_detail_page.dart';
 import 'features/visits/presentation/visit_form_page.dart';
 import 'features/shell/adaptive_shell.dart';
+import 'features/analytics/presentation/analytics_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +47,7 @@ class DocLedgerApp extends StatelessWidget {
         PatientListPage.routeName: (_) => const PatientListPage(),
         DashboardPage.routeName: (_) => const DashboardPage(),
         SubscriptionPage.routeName: (_) => const SubscriptionPage(),
+        AnalyticsPage.routeName: (_) => const AnalyticsPage(),
         // For pages with arguments, use onGenerateRoute when needed.
       },
       onGenerateRoute: (settings) {

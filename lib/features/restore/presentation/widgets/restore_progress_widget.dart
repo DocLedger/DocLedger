@@ -337,7 +337,7 @@ class DetailedRestoreProgressWidget extends StatelessWidget {
       _ProgressStep(
         icon: Icons.cloud_download,
         title: 'Downloading Data',
-        description: 'Downloading backup file from Google Drive',
+        description: 'Downloading backup file from cloud storage',
       ),
       _ProgressStep(
         icon: Icons.lock_open,

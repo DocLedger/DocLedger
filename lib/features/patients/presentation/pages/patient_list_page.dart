@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/widgets/compact_date_picker.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/services/service_locator.dart';
@@ -301,11 +302,14 @@ class _PatientListPageState extends State<PatientListPage> {
                         Expanded(child: Text(dateOfBirth != null ? '${dateOfBirth!.day}/${dateOfBirth!.month}/${dateOfBirth!.year}' : 'Pick a date')),
                         TextButton.icon(
                           onPressed: () async {
-                            final picked = await showDatePicker(
+                            final now = DateTime.now();
+                            final picked = await showCompactDatePicker(
                               context: context,
-                              firstDate: DateTime(1900),
-                              lastDate: DateTime(2100),
                               initialDate: dateOfBirth ?? DateTime(2000, 1, 1),
+                              firstDate: DateTime(1900),
+                              lastDate: DateTime(now.year + 50),
+                              previewLength: 1,
+                              title: 'Select date of birth',
                             );
                             if (picked != null) {
                               dateOfBirth = picked;

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../../core/widgets/compact_date_picker.dart';
+import '../../../../core/widgets/compact_date_time_picker.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../../../../core/data/models/data_models.dart';
@@ -110,7 +112,7 @@ class _PatientDetailPageState extends State<PatientDetailPage> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                Divider(color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5), thickness: 1, height: 1),
+                Divider(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5), thickness: 1, height: 1),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 12,
@@ -193,7 +195,7 @@ class _VisitCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3)),
+  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3)),
       ),
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -281,7 +283,7 @@ class _ActionIcon extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
-            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5)),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5)),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, size: 18),
@@ -305,59 +307,66 @@ extension on _PatientDetailPageState {
           key: formKey,
           child: SizedBox(
             width: 380,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: name,
-                    decoration: const InputDecoration(labelText: 'Name'),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: phone,
-                    decoration: const InputDecoration(labelText: 'Phone (11 digits)'),
-                    keyboardType: TextInputType.phone,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(11),
-                    ],
-                    validator: (v) {
-                      final s = (v ?? '').trim();
-                      if (s.isEmpty) return 'Required';
-                      if (s.length != 11) return 'Must be 11 digits';
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  InputDecorator(
-                    decoration: const InputDecoration(labelText: 'Date of Birth', border: OutlineInputBorder()),
-                    child: Row(
-                      children: [
-                        Expanded(child: Text(dob != null ? _formatDate(dob!) : 'Pick a date')),
-                        TextButton.icon(
-                          onPressed: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              firstDate: DateTime(1900),
-                              lastDate: DateTime(2100),
-                              initialDate: dob ?? DateTime(2000, 1, 1),
-                            );
-                            if (picked != null) {
-                              dob = picked;
-                              // ignore: invalid_use_of_protected_member
-                              (context as Element).markNeedsBuild();
-                            }
-                          },
-                          icon: const Icon(Icons.event),
-                          label: const Text('Pick date'),
+            child: StatefulBuilder(
+              builder: (context, setLocalState) {
+                return SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: name,
+                        decoration: const InputDecoration(labelText: 'Name'),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: phone,
+                        decoration: const InputDecoration(labelText: 'Phone (11 digits)'),
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(11),
+                        ],
+                        validator: (v) {
+                          final s = (v ?? '').trim();
+                          if (s.isEmpty) return 'Required';
+                          if (s.length != 11) return 'Must be 11 digits';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      InputDecorator(
+                        decoration: const InputDecoration(labelText: 'Date of Birth', border: OutlineInputBorder()),
+                        child: Row(
+                          children: [
+                            Expanded(child: Text(dob != null ? _formatDate(dob!) : 'Pick a date')),
+                            TextButton.icon(
+                              onPressed: () async {
+                                final now = DateTime.now();
+                                final picked = await showCompactDatePicker(
+                                  context: context,
+                                  initialDate: dob ?? DateTime(2000, 1, 1),
+                                  firstDate: DateTime(1900),
+                                  lastDate: DateTime(now.year + 50),
+                                  previewLength: 1,
+                                  title: 'Select date of birth',
+                                );
+                                if (picked != null) {
+                                  setLocalState(() {
+                                    dob = picked;
+                                  });
+                                }
+                              },
+                              icon: const Icon(Icons.event),
+                              label: const Text('Pick date'),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ),
@@ -369,15 +378,16 @@ extension on _PatientDetailPageState {
     );
 
     if (ok == true) {
+      if (!mounted) return;
       if (!(formKey.currentState?.validate() ?? false) || dob == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all fields correctly')));
         return;
       }
       final updated = _patient.copyWith(name: name.text.trim(), phone: phone.text.trim(), dateOfBirth: dob);
-      await _repo.updatePatient(updated);
-      if (!mounted) return;
-      setState(() => _patient = updated);
-      await _load();
+  await _repo.updatePatient(updated);
+  // Update local model; _load() will trigger a rebuild
+  _patient = updated;
+  await _load();
     }
   }
   Future<void> _confirmDeletePatient() async {
@@ -419,13 +429,13 @@ extension on _PatientDetailPageState {
     );
     if (ok == true) {
       try {
-        await _repo.deleteVisit(v.id);
-        await _load();
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Visit deleted')));
+  await _repo.deleteVisit(v.id);
+  await _load();
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Visit deleted')));
       } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete visit: $e')));
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete visit: $e')));
       }
     }
   }
@@ -439,7 +449,7 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final background = (color ?? scheme.primary).withOpacity(0.1);
+  final background = (color ?? scheme.primary).withValues(alpha: 0.1);
     final fg = color ?? scheme.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -471,9 +481,9 @@ class _SummaryHeader extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         margin: const EdgeInsets.only(right: 12),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.06),
+          color: color.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.12)),
+          border: Border.all(color: color.withValues(alpha: 0.12)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -613,6 +623,7 @@ extension on _PatientDetailPageState {
     final notes = TextEditingController();
     final feeCtrl = TextEditingController();
     DateTime? followUp;
+  TimeOfDay? followUpTime;
 
     final saved = await showDialog<bool>(
       context: context,
@@ -637,21 +648,41 @@ extension on _PatientDetailPageState {
                       decoration: const InputDecoration(labelText: 'Follow-up', border: OutlineInputBorder()),
                       child: Row(
                         children: [
-                          Expanded(child: Text(followUp != null ? _formatDate(followUp!) : 'Pick a date')),
-                          TextButton.icon(
+                          Expanded(
+                            child: Text(
+                              followUp != null
+                                  ? '${_formatDate(followUp!)}${followUpTime != null ? ' • ${MaterialLocalizations.of(context).formatTimeOfDay(followUpTime!)}' : ''}'
+                                  : 'Pick a date',
+                            ),
+                          ),
+                          OutlinedButton.icon(
                             onPressed: () async {
-                              final picked = await showDatePicker(
+                              final now = DateTime.now();
+                              final initial = followUp != null
+                                  ? DateTime(
+                                      followUp!.year,
+                                      followUp!.month,
+                                      followUp!.day,
+                                      (followUpTime ?? TimeOfDay.now()).hour,
+                                      (followUpTime ?? TimeOfDay.now()).minute,
+                                    )
+                                  : now;
+                              final dt = await showCompactDateTimePicker(
                                 context: context,
-                                firstDate: DateTime(2000),
-                                lastDate: DateTime(2100),
-                                initialDate: followUp ?? DateTime.now(),
+                                initialDateTime: initial,
+                                firstDate: DateTime(now.year - 1),
+                                lastDate: DateTime(now.year + 2),
+                                title: 'Select follow-up',
                               );
-                              if (picked != null) {
-                                setLocalState(() => followUp = picked);
+                              if (dt != null) {
+                                setLocalState(() {
+                                  followUp = DateUtils.dateOnly(dt);
+                                  followUpTime = TimeOfDay(hour: dt.hour, minute: dt.minute);
+                                });
                               }
                             },
-                            icon: const Icon(Icons.event),
-                            label: const Text('Pick date'),
+                            icon: const Icon(Icons.calendar_month),
+                            label: const Text('Pick date & time'),
                           ),
                         ],
                       ),
@@ -681,7 +712,15 @@ extension on _PatientDetailPageState {
         prescriptions: prescriptions.text.trim().isEmpty ? null : prescriptions.text.trim(),
         notes: notes.text.trim().isEmpty ? null : notes.text.trim(),
         fee: feeCtrl.text.trim().isEmpty ? null : double.tryParse(feeCtrl.text.trim()),
-        followUpDate: followUp,
+        followUpDate: followUp == null
+            ? null
+            : DateTime(
+                followUp!.year,
+                followUp!.month,
+                followUp!.day,
+                (followUpTime ?? TimeOfDay.now()).hour,
+                (followUpTime ?? TimeOfDay.now()).minute,
+              ),
         lastModified: DateTime.now(),
         deviceId: 'local',
         syncStatus: 'pending',
@@ -696,6 +735,9 @@ extension on _PatientDetailPageState {
     final notes = TextEditingController(text: v.notes ?? '');
     final feeCtrl = TextEditingController(text: v.fee?.toStringAsFixed(0) ?? '');
     DateTime? followUp = v.followUpDate;
+  TimeOfDay? followUpTime = v.followUpDate != null
+    ? TimeOfDay(hour: v.followUpDate!.hour, minute: v.followUpDate!.minute)
+    : null;
 
     final saved = await showDialog<bool>(
       context: context,
@@ -720,21 +762,41 @@ extension on _PatientDetailPageState {
                       decoration: const InputDecoration(labelText: 'Follow-up', border: OutlineInputBorder()),
                       child: Row(
                         children: [
-                          Expanded(child: Text(followUp != null ? _formatDate(followUp!) : 'Pick a date')),
-                          TextButton.icon(
+                          Expanded(
+                            child: Text(
+                              followUp != null
+                                  ? '${_formatDate(followUp!)}${followUpTime != null ? ' • ${MaterialLocalizations.of(context).formatTimeOfDay(followUpTime!)}' : ''}'
+                                  : 'Pick a date',
+                            ),
+                          ),
+                          OutlinedButton.icon(
                             onPressed: () async {
-                              final picked = await showDatePicker(
+                              final now = DateTime.now();
+                              final initial = followUp != null
+                                  ? DateTime(
+                                      followUp!.year,
+                                      followUp!.month,
+                                      followUp!.day,
+                                      (followUpTime ?? TimeOfDay.now()).hour,
+                                      (followUpTime ?? TimeOfDay.now()).minute,
+                                    )
+                                  : now;
+                              final dt = await showCompactDateTimePicker(
                                 context: context,
-                                firstDate: DateTime(2000),
-                                lastDate: DateTime(2100),
-                                initialDate: followUp ?? DateTime.now(),
+                                initialDateTime: initial,
+                                firstDate: DateTime(now.year - 1),
+                                lastDate: DateTime(now.year + 2),
+                                title: 'Select follow-up',
                               );
-                              if (picked != null) {
-                                setLocalState(() => followUp = picked);
+                              if (dt != null) {
+                                setLocalState(() {
+                                  followUp = DateUtils.dateOnly(dt);
+                                  followUpTime = TimeOfDay(hour: dt.hour, minute: dt.minute);
+                                });
                               }
                             },
-                            icon: const Icon(Icons.event),
-                            label: const Text('Pick date'),
+                            icon: const Icon(Icons.calendar_month),
+                            label: const Text('Pick date & time'),
                           ),
                         ],
                       ),
@@ -760,7 +822,15 @@ extension on _PatientDetailPageState {
         prescriptions: prescriptions.text.trim().isEmpty ? null : prescriptions.text.trim(),
         notes: notes.text.trim().isEmpty ? null : notes.text.trim(),
         fee: double.tryParse(feeCtrl.text.trim()),
-        followUpDate: followUp,
+        followUpDate: followUp == null
+            ? null
+            : DateTime(
+                followUp!.year,
+                followUp!.month,
+                followUp!.day,
+                (followUpTime ?? TimeOfDay.now()).hour,
+                (followUpTime ?? TimeOfDay.now()).minute,
+              ),
       );
       await _repo.updateVisit(updated);
       await _load();
@@ -837,25 +907,6 @@ class PatientDetailArgs {
   const PatientDetailArgs(this.patient);
 }
 
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-  const _InfoRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          SizedBox(width: 140, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700))),
-          Expanded(child: Text(value, style: const TextStyle(fontSize: 15))),
-        ],
-      ),
-    );
-  }
-}
-
 class _InfoPill extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -868,9 +919,9 @@ class _InfoPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withOpacity(0.6),
+  color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.outlineVariant.withOpacity(0.25)),
+  border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.25)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

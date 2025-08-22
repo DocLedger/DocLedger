@@ -1,12 +1,14 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../../../core/cloud/services/cloud_save_service.dart';
 import '../../../../core/cloud/models/cloud_save_models.dart';
 import '../../../../core/services/service_locator.dart';
-import '../../../../core/cloud/services/google_drive_service.dart';
-import '../../../../core/data/services/database_service.dart';
+import '../../../../core/cloud/services/webdav_backup_service.dart';
+import '../../../../core/cloud/webdav_config.dart';
 import '../../../subscription/presentation/pages/subscription_page.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../../dashboard/presentation/dashboard_page.dart';
 
 /// Simplified cloud save settings page
 class SettingsPage extends StatefulWidget {
@@ -20,54 +22,49 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   CloudSaveService? _cloudSaveService;
-  GoogleDriveService? _driveService;
+  WebDavBackupService? _webdavService;
   bool _isLoading = false;
   CloudSaveState? _currentState;
   bool _hasCloudBackup = false;
-
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  String? _loggedInUsername;
+  String? _accountMessage;
+  
   @override
   void initState() {
     super.initState();
-    
     try {
       _cloudSaveService = serviceLocator.get<CloudSaveService>();
-      _driveService = serviceLocator.get<GoogleDriveService>();
-      
-      // Listen to cloud save state changes
+      _webdavService = serviceLocator.get<WebDavBackupService>();
       _cloudSaveService?.stateStream.listen((state) {
-        if (mounted) {
-          setState(() {
-            _currentState = state;
-          });
-        }
-        if (state.status == CloudSaveStatus.idle) {
-          _refreshBackupAvailability();
-        }
+        if (mounted) setState(() => _currentState = state);
       });
-      
-      // Get initial state
       _currentState = _cloudSaveService?.currentState;
-      // Check if any backups exist initially
-      _refreshBackupAvailability();
+      _loadLoggedInUsername();
     } catch (e) {
-      print('Failed to initialize SettingsPage: $e');
-      // Show error state
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() { _isLoading = false; });
     }
+  }
+
+  Future<void> _loadLoggedInUsername() async {
+    try {
+      final stored = await _secureStorage.read(key: 'webdav_username');
+      if (mounted) {
+        setState(() {
+          _loggedInUsername = stored;
+          // Keep any explicit message; else show logged in line if available
+        });
+      }
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        centerTitle: false,
-      ),
+      appBar: AppBar(title: const Text('Settings'), centerTitle: false),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _cloudSaveService == null || _driveService == null
+          : _cloudSaveService == null || _webdavService == null
               ? _buildErrorState()
               : SingleChildScrollView(
                   padding: const EdgeInsets.all(16.0),
@@ -92,10 +89,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildAccountSection() {
-    final isLinked = _driveService?.isAuthenticated ?? false;
-    final email = _driveService?.linkedEmail ?? _driveService?.currentAccount?.email ?? '';
     final isMobile = MediaQuery.sizeOf(context).width < 600;
-    
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -103,24 +97,22 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Account',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            Text('Account', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: isLinked 
-                  ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.2)
-                  : Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4),
+                color: Theme.of(context).colorScheme.surfaceVariant.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: isMobile
-                  ? _accountRow(isLinked, email)
-                  : _accountRow(isLinked, email),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _webDavAccountRow(),
+                  const SizedBox(height: 8),
+                  _buildAccountMessageBox(),
+                ],
+              ),
             ),
           ],
         ),
@@ -128,149 +120,190 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _accountRow(bool isLinked, String email) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+  Widget _buildAccountMessageBox() {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme;
+    final String text;
+    if (_accountMessage != null && _accountMessage!.isNotEmpty) {
+      text = _accountMessage!;
+    } else if (_loggedInUsername != null && _loggedInUsername!.isNotEmpty) {
+      text = 'Logged in as ${_loggedInUsername!}';
+    } else {
+      text = 'No account linked';
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+  color: color.surfaceVariant.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(12),
+  border: Border.all(color: color.outlineVariant.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            (_loggedInUsername != null && _loggedInUsername!.isNotEmpty) ? Icons.verified_user : Icons.info_outline,
+            size: 18,
+            color: (_loggedInUsername != null && _loggedInUsername!.isNotEmpty) ? color.primary : color.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodyMedium?.copyWith(color: color.onSurfaceVariant),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _webDavAccountRow() {
+    final linkedFuture = _webdavService?.isReady() ?? Future.value(false);
+    return FutureBuilder<bool>(
+      future: linkedFuture,
+      builder: (context, snapshot) {
+        final linked = snapshot.data == true;
+        if (linked && (_loggedInUsername == null || _loggedInUsername!.isEmpty)) {
+          // Try to derive username from the runtime service when linked
+          try {
+            _webdavService?.getCurrentUsernameFolder().then((u) {
+              if (!mounted) return;
+              if (_loggedInUsername == null || _loggedInUsername!.isEmpty) {
+                setState(() { _loggedInUsername = u; });
+              }
+            });
+          } catch (_) {}
+        }
+        return Row(
           children: [
             Container(
-              width: 48,
-              height: 48,
+              width: 48, height: 48,
               decoration: BoxDecoration(
-                color: isLinked 
-                  ? Theme.of(context).colorScheme.primary
-                  : Theme.of(context).colorScheme.surfaceVariant,
+                color: linked ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.surfaceVariant,
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                isLinked ? Icons.account_circle : Icons.account_circle_outlined,
-                color: isLinked 
-                  ? Theme.of(context).colorScheme.onPrimary
-                  : Theme.of(context).colorScheme.onSurfaceVariant,
-                size: 28,
-              ),
+              child: Icon(Icons.cloud, color: linked ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).colorScheme.onSurfaceVariant, size: 28),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Text(
-                isLinked ? 'Google Account Linked' : 'No Account Linked',
+                'WebDAV Cloud',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: isLinked 
-                    ? Theme.of(context).colorScheme.primary
-                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                  color: linked ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
             const SizedBox(width: 12),
             FilledButton.icon(
-              onPressed: _isLoading || _driveService == null
-                  ? null
-                  : () async {
-                      setState(() => _isLoading = true);
-                      try {
-                        final wasLinked = isLinked;
-                        bool didLinkOrSwitch = false;
-                        bool cancelled = false;
-
-                        if (wasLinked) {
-                          final result = await _driveService!.switchAccount();
-                          if (!mounted) return;
-                          switch (result) {
-                            case SwitchAccountResult.switched:
-                              didLinkOrSwitch = true;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Account switched')),
-                              );
-                              break;
-                            case SwitchAccountResult.unchanged:
-                              // No snackbar needed; nothing really changed
-                              break;
-                            case SwitchAccountResult.cancelled:
-                              cancelled = true;
-                              // No snackbar; user cancelled
-                              break;
-                          }
-                        } else {
-                          final ok = await _driveService!.authenticate(forceAccountSelection: true);
-                          if (!mounted) return;
-                          didLinkOrSwitch = ok;
-                          if (ok) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Google account linked successfully')),
-                            );
-                          } else {
-                            cancelled = true;
-                          }
-                        }
-
-                        if (didLinkOrSwitch) {
-                          setState(() {
-                            _currentState = CloudSaveState.idle(
-                              lastSaveTime: _currentState?.lastSaveTime,
-                            );
-                          });
-                          // Only trigger post-link flow if we just linked from an unlinked state
-                          if (!wasLinked) {
-                            await _handlePostLink();
-                          }
-                        } else if (!cancelled) {
-                          // Operation completed but unchanged; just refresh UI state
-                          setState(() {});
-                        }
-                      } catch (e) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Failed: $e')),
-                        );
-                      } finally {
-                        if (mounted) setState(() => _isLoading = false);
-                      }
-                    },
-              icon: Icon(
-                isLinked ? Icons.swap_horiz : Icons.link,
-                size: 18,
-              ),
-              label: Text(isLinked ? 'Switch' : 'Link'),
+              onPressed: _isLoading ? null : _openLoginFromLinkDialog,
+              icon: const Icon(Icons.login, size: 18),
+              label: Text(linked ? 'Relink' : 'Login'),
             ),
           ],
-        ),
-        const SizedBox(height: 8),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-            ),
-          ),
-          child: Row(
+        );
+      },
+    );
+  }
+
+  // Login dialog (username/password), uses preconfigured WebDAV URL/email/password from WebDavConfig or stored setup
+  Future<void> _openLoginFromLinkDialog() async {
+    // If not configured in code, ensure stored creds exist
+    if (!WebDavConfig.hasCredentials) {
+      final ensured = await _ensureServerCreds();
+      if (!ensured) return;
+    }
+
+    final usernameController = TextEditingController();
+    final passwordController = TextEditingController(); // placeholder for future
+    final formKey = GlobalKey<FormState>();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Login to Cloud'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                (isLinked && email.isNotEmpty) ? Icons.email_outlined : Icons.info_outline,
-                size: 18,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              TextFormField(
+                controller: usernameController,
+                decoration: const InputDecoration(labelText: 'Username'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  (isLinked && email.isNotEmpty)
-                      ? 'Account email: $email'
-                      : 'Link your Google account to enable cloud storage',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                  softWrap: true,
-                ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: passwordController,
+                decoration: const InputDecoration(labelText: 'Password'),
+                obscureText: true,
               ),
             ],
           ),
         ),
-      ],
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() == true) {
+                Navigator.of(context).pop(true);
+              }
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
     );
+
+    if (confirmed != true) return;
+
+    final username = usernameController.text.trim().toLowerCase();
+    setState(() => _isLoading = true);
+    try {
+      // If using stored creds, load them, else WebDavConfig has them
+      final creds = WebDavConfig.hasCredentials ? {
+        'baseUrl': WebDavConfig.baseUrl,
+        'email': WebDavConfig.email,
+        'password': WebDavConfig.password,
+      } : await _loadServerCreds();
+      if (creds == null) {
+        throw Exception('Server credentials not set');
+      }
+
+      // Verify user and ensure folder
+      final ok = await _verifyUserAndPrepareFolder(username);
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User not found in users directory.')),
+        );
+        return;
+      }
+
+      // Set username folder into service so CloudSaveService can upload there
+      await _webdavService!.setUsernameFolder(username);
+
+      // Update UI immediately and persist username (best effort on desktop)
+      if (mounted) setState(() { _loggedInUsername = username; });
+      try { await _secureStorage.write(key: 'webdav_username', value: username); } catch (_) {}
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Logged in successfully.')),
+      );
+
+      // Optional: trigger a first backup or handle restore prompt
+      await _handlePostLink();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Login failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Widget _buildSupportSection() {
@@ -310,7 +343,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSubscriptionSection() {
     final colorScheme = Theme.of(context).colorScheme;
-    final bgColor = colorScheme.surfaceVariant.withOpacity(0.4);
+  final bgColor = colorScheme.surfaceVariant.withValues(alpha: 0.4);
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -369,51 +402,57 @@ class _SettingsPageState extends State<SettingsPage> {
       margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Auto-Save to Cloud',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Automatically save your data to cloud with simple controls.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _SettingSwitch(
-              title: 'Auto-Save to Cloud',
-              subtitle: 'Automatically save your data to cloud',
-              value: _cloudSaveService?.autoSaveEnabled ?? true,
-              onChanged: _cloudSaveService == null ? null : (value) async {
-                await _cloudSaveService!.setAutoSaveEnabled(value);
-                setState(() {});
-              },
-            ),
-            _SettingSwitch(
-              title: 'WiFi Only',
-              subtitle: 'Only save to cloud when connected to WiFi',
-              value: _cloudSaveService?.wifiOnlyMode ?? true,
-              onChanged: _cloudSaveService == null ? null : (value) async {
-                await _cloudSaveService!.setWifiOnlyMode(value);
-                setState(() {});
-              },
-            ),
-            _SettingSwitch(
-              title: 'Show Notifications',
-              subtitle: 'Show notifications when data is saved or restored',
-              value: _cloudSaveService?.showNotifications ?? true,
-              onChanged: _cloudSaveService == null ? null : (value) async {
-                await _cloudSaveService!.setShowNotifications(value);
-                setState(() {});
-              },
-            ),
-          ],
+        child: FutureBuilder<bool>(
+          future: _webdavService?.isReady() ?? Future.value(false),
+          builder: (context, snapshot) {
+            final linked = snapshot.data == true;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Auto-Save to Cloud',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Automatically save your data to cloud with simple controls.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _SettingSwitch(
+                  title: 'Auto-Save to Cloud',
+                  subtitle: 'Automatically save your data to cloud',
+                  value: _cloudSaveService?.autoSaveEnabled ?? true,
+                  onChanged: (!linked || _cloudSaveService == null) ? null : (value) async {
+                    await _cloudSaveService!.setAutoSaveEnabled(value);
+                    setState(() {});
+                  },
+                ),
+                _SettingSwitch(
+                  title: 'WiFi Only',
+                  subtitle: 'Only save to cloud when connected to WiFi',
+                  value: _cloudSaveService?.wifiOnlyMode ?? true,
+                  onChanged: (!linked || _cloudSaveService == null) ? null : (value) async {
+                    await _cloudSaveService!.setWifiOnlyMode(value);
+                    setState(() {});
+                  },
+                ),
+                _SettingSwitch(
+                  title: 'Show Notifications',
+                  subtitle: 'Show notifications when data is saved or restored',
+                  value: _cloudSaveService?.showNotifications ?? true,
+                  onChanged: (!linked || _cloudSaveService == null) ? null : (value) async {
+                    await _cloudSaveService!.setShowNotifications(value);
+                    setState(() {});
+                  },
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -457,17 +496,17 @@ class _SettingsPageState extends State<SettingsPage> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: isError 
-                  ? Theme.of(context).colorScheme.errorContainer.withOpacity(0.3)
+                  ? Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.3)
                   : isWorking
-                    ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3)
-                    : Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                    ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3)
+                    : Theme.of(context).colorScheme.surfaceVariant.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: isError 
-                    ? Theme.of(context).colorScheme.error.withOpacity(0.3)
+                  color: isError
+                    ? Theme.of(context).colorScheme.error.withValues(alpha: 0.3)
                     : isWorking
-                      ? Theme.of(context).colorScheme.primary.withOpacity(0.3)
-                      : Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)
+                      : Theme.of(context).colorScheme.outline.withValues(alpha: 0.3),
                 ),
               ),
               child: Column(
@@ -543,35 +582,38 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             
             // Actions area: Sync with Cloud (decides restore/upload)
-            if (!isWorking && (_driveService?.isAuthenticated ?? false)) ...[
-              const SizedBox(height: 16),
-              Builder(
-                builder: (context) {
-                  if (isMobile) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        FilledButton.icon(
-                          onPressed: (_cloudSaveService?.shouldEnableSync ?? false) ? _syncNow : null,
-                          icon: const Icon(Icons.sync, size: 18),
-                          label: const Text('Sync with Cloud'),
-                        ),
-                      ],
-                    );
-                  }
-                  // Desktop/tablet wide: Sync
-                  return Row(
-                    children: [
-                      FilledButton.icon(
-                        onPressed: (_cloudSaveService?.shouldEnableSync ?? false) ? _syncNow : null,
-                        icon: const Icon(Icons.sync, size: 18),
-                        label: const Text('Sync with Cloud'),
-                      ),
-                    ],
+            FutureBuilder<bool>(
+              future: _webdavService?.isReady() ?? Future.value(false),
+              builder: (context, snapshot) {
+                final linked = snapshot.data == true;
+                if (!isWorking && linked) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: isMobile
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              FilledButton.icon(
+                                onPressed: (_cloudSaveService?.shouldEnableSync ?? false) ? _syncNow : null,
+                                icon: const Icon(Icons.sync, size: 18),
+                                label: const Text('Sync with Cloud'),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              FilledButton.icon(
+                                onPressed: (_cloudSaveService?.shouldEnableSync ?? false) ? _syncNow : null,
+                                icon: const Icon(Icons.sync, size: 18),
+                                label: const Text('Sync with Cloud'),
+                              ),
+                            ],
+                          ),
                   );
-                },
-              ),
-            ],
+                }
+                return const SizedBox.shrink();
+              },
+            ),
           ],
         ),
       ),
@@ -696,11 +738,21 @@ class _SettingsPageState extends State<SettingsPage> {
   // Checks whether at least one backup exists to enable restore
   Future<void> _refreshBackupAvailability() async {
     try {
-      if (_driveService?.isAuthenticated ?? false) {
-        final latest = await _driveService!.getLatestBackup();
+      final linked = await (_webdavService?.isReady() ?? Future.value(false));
+      if (linked) {
+        await _cloudSaveService?.refreshSyncStatus();
+        // Robust check: try latest then list
+        bool any = await _cloudSaveService?.hasAnyCloudBackup() ?? false;
+        if (!any) {
+          try {
+            final svc = serviceLocator.get<WebDavBackupService>();
+            final list = await svc.listBackups(null);
+            any = list.isNotEmpty;
+          } catch (_) {}
+        }
         if (mounted) {
           setState(() {
-            _hasCloudBackup = latest != null;
+            _hasCloudBackup = any;
           });
         }
       } else {
@@ -748,8 +800,8 @@ class _SettingsPageState extends State<SettingsPage> {
       // empty backup. Leave the Restore button enabled so they can restore later.
       return;
     }
-    // If no backup exists, schedule the first backup as before
-    _scheduleFirstBackup();
+    // No existing backup: do not schedule an immediate backup. User can sync manually later.
+    return;
   }
 
   Widget _buildErrorState() {
@@ -802,6 +854,146 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
+
+  Future<bool> _ensureServerCreds() async {
+    final existing = await _loadServerCreds();
+    if (existing != null || WebDavConfig.hasCredentials) return true;
+
+    return await _promptServerCredsDialog() == true;
+  }
+
+  Future<bool?> _promptServerCredsDialog() async {
+    final baseUrlController = TextEditingController(text: 'https://ewebdav.pcloud.com');
+    final emailController = TextEditingController();
+    final passwordController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Set up WebDAV server'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: baseUrlController,
+                decoration: const InputDecoration(labelText: 'Server URL'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: emailController,
+                decoration: const InputDecoration(labelText: 'WebDAV Email'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: passwordController,
+                decoration: const InputDecoration(labelText: 'WebDAV Password'),
+                obscureText: true,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() == true) {
+                Navigator.of(context).pop(true);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (saved == true) {
+      final base = baseUrlController.text.trim();
+      final email = emailController.text.trim();
+      final pass = passwordController.text;
+      await _saveServerCreds(base, email, pass);
+      // Update the runtime service too
+      try {
+        final svc = serviceLocator.get<WebDavBackupService>();
+        await svc.setCredentials(base, email, pass);
+      } catch (_) {}
+      return true;
+    }
+    return false;
+  }
+
+  Future<Map<String, String>?> _loadServerCreds() async {
+    if (WebDavConfig.hasCredentials) {
+      return {
+        'baseUrl': WebDavConfig.baseUrl,
+        'email': WebDavConfig.email,
+        'password': WebDavConfig.password,
+      };
+    }
+    final baseUrl = await _secureStorage.read(key: 'webdav_base_url');
+    final email = await _secureStorage.read(key: 'webdav_email');
+    final password = await _secureStorage.read(key: 'webdav_password');
+    if (baseUrl != null && email != null && password != null) {
+      return {
+        'baseUrl': baseUrl,
+        'email': email,
+        'password': password,
+      };
+    }
+    return null;
+  }
+
+  Future<void> _saveServerCreds(String baseUrl, String email, String password) async {
+    await _secureStorage.write(key: 'webdav_base_url', value: baseUrl);
+    await _secureStorage.write(key: 'webdav_email', value: email);
+    await _secureStorage.write(key: 'webdav_password', value: password);
+  }
+
+  Future<bool> _verifyUserAndPrepareFolder(String username) async {
+    final creds = await _loadServerCreds();
+    if (creds == null) return false;
+
+    String _normalize(String url) => url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+
+    final base = _normalize(creds['baseUrl']!);
+    final email = creds['email']!;
+    final password = creds['password']!;
+    final authHeader = 'Basic ' + base64Encode(utf8.encode('$email:$password'));
+
+    // Verify user marker exists
+    final markerUri = Uri.parse('$base/docledger_backups/users/$username.json');
+    final markerResp = await http.get(markerUri, headers: {
+      'Authorization': authHeader,
+    });
+
+    // add a log for the terminal to check response
+    print('Checking user marker at $markerUri: ${markerResp.statusCode}');
+
+    if (markerResp.statusCode != 200) {
+      return false;
+    }
+
+    // Ensure user backup folder exists
+    final folderUri = Uri.parse('$base/docledger_backups/$username/');
+    final mkcol = http.Request('MKCOL', folderUri);
+    mkcol.headers['Authorization'] = authHeader;
+    mkcol.headers['Content-Length'] = '0';
+    final mkcolResp = await mkcol.send();
+
+    if (mkcolResp.statusCode == 201 || mkcolResp.statusCode == 405 || mkcolResp.statusCode == 409) {
+      return true;
+    }
+    if (mkcolResp.statusCode >= 200 && mkcolResp.statusCode < 400) {
+      return true;
+    }
+    return false;
+  }
+  
 }
 
 class _SettingSwitch extends StatelessWidget {

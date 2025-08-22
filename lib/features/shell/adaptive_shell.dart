@@ -5,6 +5,7 @@ import 'desktop_shell.dart';
 import '../dashboard/presentation/dashboard_page.dart';
 import '../settings/presentation/pages/settings_page.dart';
 import '../patients/presentation/pages/patient_list_page.dart';
+import '../analytics/presentation/analytics_page.dart';
 
 /// Picks the right shell for the current form factor.
 /// - Desktop/tablet wide screens: `DesktopShell`
@@ -44,6 +45,7 @@ class _MobileRootShellState extends State<_MobileRootShell> {
   static const List<Widget> _pages = <Widget>[
     DashboardPage(embedded: true),
     PatientListPage(),
+    AnalyticsPage(),
     SettingsPage(),
   ];
 
@@ -67,6 +69,7 @@ class _MobileRootShellState extends State<_MobileRootShell> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: 'Patients'),
+          NavigationDestination(icon: Icon(Icons.analytics_outlined), selectedIcon: Icon(Icons.analytics), label: 'Analytics'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
         onDestinationSelected: (i) => setState(() => _index = i),
