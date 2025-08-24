@@ -44,7 +44,13 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
               onChanged: (v) => setState(() => _filter = v),
             ),
             const SizedBox(height: 12),
-            Expanded(child: _AppointmentsList(filter: _filter, repo: _repo)),
+            Expanded(
+              child: _AppointmentsList(
+                filter: _filter,
+                repo: _repo,
+                onChanged: () => setState(() {}),
+              ),
+            ),
           ],
         ),
       ),
@@ -91,7 +97,8 @@ class _FilterChips extends StatelessWidget {
 class _AppointmentsList extends StatelessWidget {
   final String filter;
   final DataRepository repo;
-  const _AppointmentsList({required this.filter, required this.repo});
+  final VoidCallback onChanged;
+  const _AppointmentsList({required this.filter, required this.repo, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -115,7 +122,7 @@ class _AppointmentsList extends StatelessWidget {
         return ListView.separated(
           itemCount: data.length,
           separatorBuilder: (_, __) => const Divider(height: 8),
-          itemBuilder: (_, i) => _AppointmentRow(appt: data[i], repo: repo),
+    itemBuilder: (_, i) => _AppointmentRow(appt: data[i], repo: repo, onChanged: onChanged),
         );
       },
     );
@@ -125,7 +132,8 @@ class _AppointmentsList extends StatelessWidget {
 class _AppointmentRow extends StatelessWidget {
   final Appointment appt;
   final DataRepository repo;
-  const _AppointmentRow({required this.appt, required this.repo});
+  final VoidCallback onChanged;
+  const _AppointmentRow({required this.appt, required this.repo, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -193,6 +201,39 @@ class _AppointmentRow extends StatelessWidget {
             },
             icon: const Icon(Icons.person),
             label: const Text('As patient'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.35)),
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Delete appointment?'),
+                  content: const Text('This action cannot be undone.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                    FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                      onPressed: () => Navigator.of(ctx).pop(true),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              );
+              if (ok == true) {
+                await repo.deleteAppointment(appt.id);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Appointment deleted')));
+                }
+                onChanged();
+              }
+            },
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete'),
           ),
         ],
       ),
@@ -413,7 +454,10 @@ class _DateTimePicker extends StatelessWidget {
               if (d == null) return;
               onChanged(DateTime(d.year, d.month, d.day, value.hour, value.minute));
             },
-            child: Text(_date(value)),
+            child: Align(
+              alignment: Alignment.center,
+              child: Text(_date(value)),
+            ),
           ),
         ),
         const SizedBox(width: 8),
@@ -429,7 +473,10 @@ class _DateTimePicker extends StatelessWidget {
               if (t == null) return;
               onChanged(DateTime(value.year, value.month, value.day, t.hour, t.minute));
             },
-            child: Text(TimeOfDay.fromDateTime(value).format(context)),
+            child: Align(
+              alignment: Alignment.center,
+              child: Text(TimeOfDay.fromDateTime(value).format(context)),
+            ),
           ),
         ),
       ],

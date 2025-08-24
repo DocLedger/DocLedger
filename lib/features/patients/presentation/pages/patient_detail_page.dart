@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/widgets/compact_date_picker.dart';
-import '../../../../core/widgets/compact_date_time_picker.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../../../../core/data/models/data_models.dart';
@@ -94,7 +93,12 @@ class _PatientDetailPageState extends State<PatientDetailPage> {
                       const SizedBox(width: 8),
                       _ActionIcon(icon: Icons.print, tooltip: 'Print', onPressed: _printPatientSummary),
                       const SizedBox(width: 8),
-                      _ActionIcon(icon: Icons.delete_outline, tooltip: 'Delete', onPressed: _confirmDeletePatient),
+                      _ActionIcon(
+                        icon: Icons.delete_outline,
+                        tooltip: 'Delete',
+                        onPressed: _confirmDeletePatient,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                     ],
                   ],
                 ),
@@ -253,7 +257,12 @@ class _VisitCard extends StatelessWidget {
                     const SizedBox(width: 7),
                     _ActionIcon(icon: Icons.print, tooltip: 'Print', onPressed: onPrint),
                     const SizedBox(width: 7),
-                    _ActionIcon(icon: Icons.delete_outline, tooltip: 'Delete', onPressed: onDelete),
+                    _ActionIcon(
+                      icon: Icons.delete_outline,
+                      tooltip: 'Delete',
+                      onPressed: onDelete,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ],
                 ),
               ],
@@ -271,7 +280,8 @@ class _ActionIcon extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
-  const _ActionIcon({required this.icon, required this.tooltip, required this.onPressed});
+  final Color? color; // optional accent color (e.g., error for delete)
+  const _ActionIcon({required this.icon, required this.tooltip, required this.onPressed, this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -283,10 +293,13 @@ class _ActionIcon extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
-            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5)),
+            border: Border.all(
+              color: (color ?? Theme.of(context).colorScheme.outlineVariant)
+                  .withValues(alpha: color != null ? 0.35 : 0.5),
+            ),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, size: 18),
+          child: Icon(icon, size: 18, color: color),
         ),
       ),
     );
@@ -335,12 +348,21 @@ extension on _PatientDetailPageState {
                         },
                       ),
                       const SizedBox(height: 8),
-                      InputDecorator(
-                        decoration: const InputDecoration(labelText: 'Date of Birth', border: OutlineInputBorder()),
-                        child: Row(
+                      Builder(builder: (context) {
+                        final cs = Theme.of(context).colorScheme;
+                        final btnStyle = OutlinedButton.styleFrom(
+                          side: BorderSide(color: cs.primary.withValues(alpha: 0.35)),
+                        );
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(child: Text(dob != null ? _formatDate(dob!) : '-')),
-                            TextButton.icon(
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4),
+                              child: Text('Date of Birth'),
+                            ),
+                            const SizedBox(height: 6),
+                            OutlinedButton(
+                              style: btnStyle,
                               onPressed: () async {
                                 final now = DateTime.now();
                                 final picked = await showCompactDatePicker(
@@ -357,13 +379,14 @@ extension on _PatientDetailPageState {
                                   });
                                 }
                               },
-                              icon: const Icon(Icons.event),
-                              label: const Text('Pick date'),
+                                  child: Align(
+                                    alignment: Alignment.center,
+                                    child: Text(dob != null ? _formatDate(dob!) : 'Select date'),
+                                  ),
                             ),
-                            // No Clear button; DOB is optional and can be left unset
                           ],
-                        ),
-                      ),
+                        );
+                      }),
                     ],
                   ),
                 );
@@ -399,7 +422,11 @@ extension on _PatientDetailPageState {
         content: const Text('This will remove the patient and all related data. This action cannot be undone.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -424,7 +451,11 @@ extension on _PatientDetailPageState {
         content: const Text('This will delete the visit and its payments.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -672,49 +703,86 @@ extension on _PatientDetailPageState {
                       keyboardType: TextInputType.number,
                     ),
                     const SizedBox(height: 6),
-                    InputDecorator(
-                      decoration: const InputDecoration(labelText: 'Follow-up', border: OutlineInputBorder()),
-                      child: Row(
+                    Builder(builder: (context) {
+                      final cs = Theme.of(context).colorScheme;
+                      final btnStyle = OutlinedButton.styleFrom(
+                        side: BorderSide(color: cs.primary.withValues(alpha: 0.35)),
+                      );
+                      final current = followUp != null
+                          ? DateTime(
+                              followUp!.year,
+                              followUp!.month,
+                              followUp!.day,
+                              (followUpTime ?? TimeOfDay.now()).hour,
+                              (followUpTime ?? TimeOfDay.now()).minute,
+                            )
+                          : null;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Text(
-                              followUp != null
-                                  ? '${_formatDate(followUp!)}${followUpTime != null ? ' • ${MaterialLocalizations.of(context).formatTimeOfDay(followUpTime!)}' : ''}'
-                                  : '-',
-                            ),
+                          const Padding(
+                            padding: EdgeInsets.only(left: 4),
+                            child: Text('Follow-up'),
                           ),
-                          TextButton.icon(
-                            onPressed: () async {
-                              final now = DateTime.now();
-                              final initial = followUp != null
-                                  ? DateTime(
-                                      followUp!.year,
-                                      followUp!.month,
-                                      followUp!.day,
-                                      (followUpTime ?? TimeOfDay.now()).hour,
-                                      (followUpTime ?? TimeOfDay.now()).minute,
-                                    )
-                                  : now;
-                              final dt = await showCompactDateTimePicker(
-                                context: context,
-                                initialDateTime: initial,
-                                firstDate: DateTime(now.year - 1),
-                                lastDate: DateTime(now.year + 2),
-                                title: 'Select follow-up',
-                              );
-                              if (dt != null) {
-                                setLocalState(() {
-                                  followUp = DateUtils.dateOnly(dt);
-                                  followUpTime = TimeOfDay(hour: dt.hour, minute: dt.minute);
-                                });
-                              }
-                            },
-                            icon: const Icon(Icons.event),
-                            label: const Text('Pick date & time'),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  style: btnStyle,
+                                  onPressed: () async {
+                                    final now = DateTime.now();
+                                    final base = current ?? now;
+                                    final d = await showCompactDatePicker(
+                                      context: context,
+                                      initialDate: base,
+                                      firstDate: DateTime(now.year - 1),
+                                      lastDate: DateTime(now.year + 2),
+                                      previewLength: 1,
+                                      title: 'Select follow-up date',
+                                    );
+                                    if (d == null) return;
+                                    setLocalState(() {
+                                      followUp = DateUtils.dateOnly(d);
+                                    });
+                                  },
+                                  child: Align(
+                                    alignment: Alignment.center,
+                                    child: Text(current != null ? _formatDate(current) : 'Select date'),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton(
+                                  style: btnStyle,
+                                  onPressed: () async {
+                                    final base = current ?? DateTime.now();
+                                    final t = await showTimePicker(
+                                      context: context,
+                                      initialTime: TimeOfDay.fromDateTime(base),
+                                      initialEntryMode: TimePickerEntryMode.input,
+                                    );
+                                    if (t == null) return;
+                                    setLocalState(() {
+                                      followUpTime = t;
+                                      followUp = followUp ?? DateUtils.dateOnly(base);
+                                    });
+                                  },
+                                  child: Align(
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      (followUpTime ?? (current != null ? TimeOfDay.fromDateTime(current) : TimeOfDay.now()))
+                                          .format(context),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
-                      ),
-                    ),
+                      );
+                    }),
                     const SizedBox(height: 6),
                     TextField(
                       controller: notes,
@@ -813,49 +881,86 @@ extension on _PatientDetailPageState {
                       keyboardType: TextInputType.number,
                     ),
                     const SizedBox(height: 6),
-                    InputDecorator(
-                      decoration: const InputDecoration(labelText: 'Follow-up', border: OutlineInputBorder()),
-                      child: Row(
+                    Builder(builder: (context) {
+                      final cs = Theme.of(context).colorScheme;
+                      final btnStyle = OutlinedButton.styleFrom(
+                        side: BorderSide(color: cs.primary.withValues(alpha: 0.35)),
+                      );
+                      final current = followUp != null
+                          ? DateTime(
+                              followUp!.year,
+                              followUp!.month,
+                              followUp!.day,
+                              (followUpTime ?? TimeOfDay.now()).hour,
+                              (followUpTime ?? TimeOfDay.now()).minute,
+                            )
+                          : null;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Text(
-                              followUp != null
-                                  ? '${_formatDate(followUp!)}${followUpTime != null ? ' • ${MaterialLocalizations.of(context).formatTimeOfDay(followUpTime!)}' : ''}'
-                                  : '-',
-                            ),
+                          const Padding(
+                            padding: EdgeInsets.only(left: 4),
+                            child: Text('Follow-up'),
                           ),
-                          TextButton.icon(
-                            onPressed: () async {
-                              final now = DateTime.now();
-                              final initial = followUp != null
-                                  ? DateTime(
-                                      followUp!.year,
-                                      followUp!.month,
-                                      followUp!.day,
-                                      (followUpTime ?? TimeOfDay.now()).hour,
-                                      (followUpTime ?? TimeOfDay.now()).minute,
-                                    )
-                                  : now;
-                              final dt = await showCompactDateTimePicker(
-                                context: context,
-                                initialDateTime: initial,
-                                firstDate: DateTime(now.year - 1),
-                                lastDate: DateTime(now.year + 2),
-                                title: 'Select follow-up',
-                              );
-                              if (dt != null) {
-                                setLocalState(() {
-                                  followUp = DateUtils.dateOnly(dt);
-                                  followUpTime = TimeOfDay(hour: dt.hour, minute: dt.minute);
-                                });
-                              }
-                            },
-                            icon: const Icon(Icons.event),
-                            label: const Text('Pick date & time'),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  style: btnStyle,
+                                  onPressed: () async {
+                                    final now = DateTime.now();
+                                    final base = current ?? now;
+                                    final d = await showCompactDatePicker(
+                                      context: context,
+                                      initialDate: base,
+                                      firstDate: DateTime(now.year - 1),
+                                      lastDate: DateTime(now.year + 2),
+                                      previewLength: 1,
+                                      title: 'Select follow-up date',
+                                    );
+                                    if (d == null) return;
+                                    setLocalState(() {
+                                      followUp = DateUtils.dateOnly(d);
+                                    });
+                                  },
+                                  child: Align(
+                                    alignment: Alignment.center,
+                                    child: Text(current != null ? _formatDate(current) : 'Select date'),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton(
+                                  style: btnStyle,
+                                  onPressed: () async {
+                                    final base = current ?? DateTime.now();
+                                    final t = await showTimePicker(
+                                      context: context,
+                                      initialTime: TimeOfDay.fromDateTime(base),
+                                      initialEntryMode: TimePickerEntryMode.input,
+                                    );
+                                    if (t == null) return;
+                                    setLocalState(() {
+                                      followUpTime = t;
+                                      followUp = followUp ?? DateUtils.dateOnly(base);
+                                    });
+                                  },
+                                  child: Align(
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      (followUpTime ?? (current != null ? TimeOfDay.fromDateTime(current) : TimeOfDay.now()))
+                                          .format(context),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
-                      ),
-                    ),
+                      );
+                    }),
                     const SizedBox(height: 6),
                     TextField(
                       controller: notes,

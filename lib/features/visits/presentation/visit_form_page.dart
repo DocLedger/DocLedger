@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../core/widgets/compact_date_time_picker.dart';
+import '../../../core/widgets/compact_date_picker.dart';
 import '../../../core/data/models/data_models.dart' as models;
 import '../../../core/services/service_locator.dart';
 import '../../../core/data/repositories/data_repository.dart';
@@ -60,9 +60,13 @@ class _VisitFormPageState extends State<VisitFormPage> {
               decoration: const InputDecoration(labelText: 'Fee'),
             ),
             const SizedBox(height: 12),
-            // Follow-up picker: combined date & time (responsive layout)
-            LayoutBuilder(builder: (context, c) {
-              final dt = _followUpDate != null
+            // Follow-up picker: separate outlined buttons for date and time (matches Appointments)
+            Builder(builder: (context) {
+              final cs = Theme.of(context).colorScheme;
+              final btnStyle = OutlinedButton.styleFrom(
+                side: BorderSide(color: cs.primary.withValues(alpha: 0.35)),
+              );
+              final current = _followUpDate != null
                   ? DateTime(
                       _followUpDate!.year,
                       _followUpDate!.month,
@@ -71,27 +75,73 @@ class _VisitFormPageState extends State<VisitFormPage> {
                       (_followUpTime ?? TimeOfDay.now()).minute,
                     )
                   : null;
-              final dateLabel = dt != null ? _formatDate(dt) : 'Select date & time';
-              final row = Row(
-                children: [
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: _pickFollowUpDateTime,
-                      icon: const Icon(Icons.event),
-                      label: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(dateLabel, overflow: TextOverflow.ellipsis),
-                      ),
-                    ),
-                  ),
-                ],
-              );
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Follow-up'),
+                  const Padding(
+                    padding: EdgeInsets.only(left: 4),
+                    child: Text('Follow-up'),
+                  ),
                   const SizedBox(height: 8),
-                  row,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: btnStyle,
+                          onPressed: () async {
+                            final now = DateTime.now();
+                            final base = current ?? now;
+                            final d = await showCompactDatePicker(
+                              context: context,
+                              initialDate: base,
+                              firstDate: now.subtract(const Duration(days: 365)),
+                              lastDate: now.add(const Duration(days: 365 * 2)),
+                              previewLength: 1,
+                              title: 'Select follow-up date',
+                            );
+                            if (d == null) return;
+                            setState(() {
+                              _followUpDate = DateUtils.dateOnly(d);
+                            });
+                          },
+                          child: Align(
+                            alignment: Alignment.center,
+                            child: Text(current != null ? _formatDate(current) : 'Select date'),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          style: btnStyle,
+                          onPressed: () async {
+                            final base = current ?? DateTime.now();
+                            final t = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.fromDateTime(base),
+                              initialEntryMode: TimePickerEntryMode.input,
+                            );
+                            if (t == null) return;
+                            setState(() {
+                              _followUpTime = t;
+                              _followUpDate = _followUpDate ?? DateUtils.dateOnly(base);
+                            });
+                          },
+                          child: Align(
+                            alignment: Alignment.center,
+                            child: Text(
+                              (_followUpTime != null
+                                      ? _followUpTime!
+                                      : current != null
+                                          ? TimeOfDay.fromDateTime(current)
+                                          : TimeOfDay.now())
+                                  .format(context),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               );
             }),
@@ -112,31 +162,7 @@ class _VisitFormPageState extends State<VisitFormPage> {
     );
   }
 
-  Future<void> _pickFollowUpDateTime() async {
-    final now = DateTime.now();
-    final initial = _followUpDate != null
-        ? DateTime(
-            _followUpDate!.year,
-            _followUpDate!.month,
-            _followUpDate!.day,
-            (_followUpTime ?? TimeOfDay.now()).hour,
-            (_followUpTime ?? TimeOfDay.now()).minute,
-          )
-        : now;
-    final picked = await showCompactDateTimePicker(
-      context: context,
-      initialDateTime: initial,
-      firstDate: now.subtract(const Duration(days: 365)),
-      lastDate: now.add(const Duration(days: 365 * 2)),
-      title: 'Select follow-up',
-    );
-    if (picked != null) {
-      setState(() {
-        _followUpDate = DateUtils.dateOnly(picked);
-        _followUpTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
-      });
-    }
-  }
+  // Date & time are picked separately above; keep helper removed to avoid confusion.
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;

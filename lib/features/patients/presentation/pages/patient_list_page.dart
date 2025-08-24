@@ -310,12 +310,21 @@ class _PatientListPageState extends State<PatientListPage> {
                     },
                   ),
                   const SizedBox(height: 8),
-                  InputDecorator(
-                    decoration: const InputDecoration(labelText: 'Date of Birth', border: OutlineInputBorder()),
-                    child: Row(
+                  Builder(builder: (context) {
+                    final cs = Theme.of(context).colorScheme;
+                    final btnStyle = OutlinedButton.styleFrom(
+                      side: BorderSide(color: cs.primary.withValues(alpha: 0.35)),
+                    );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(child: Text(dateOfBirth != null ? '${dateOfBirth!.day}/${dateOfBirth!.month}/${dateOfBirth!.year}' : '-')),
-                        TextButton.icon(
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: Text('Date of Birth'),
+                        ),
+                        const SizedBox(height: 6),
+                        OutlinedButton(
+                          style: btnStyle,
                           onPressed: () async {
                             final now = DateTime.now();
                             final picked = await showCompactDatePicker(
@@ -332,13 +341,18 @@ class _PatientListPageState extends State<PatientListPage> {
                               (context as Element).markNeedsBuild();
                             }
                           },
-                          icon: const Icon(Icons.event),
-                          label: const Text('Pick date'),
+                          child: Align(
+                            alignment: Alignment.center,
+                            child: Text(
+                              dateOfBirth != null
+                                  ? '${dateOfBirth!.day}/${dateOfBirth!.month}/${dateOfBirth!.year}'
+                                  : 'Select date',
+                            ),
+                          ),
                         ),
-                        // No Clear button; DOB is optional and can be left unset
                       ],
-                    ),
-                  ),
+                    );
+                  }),
                 ],
               ),
             ),
