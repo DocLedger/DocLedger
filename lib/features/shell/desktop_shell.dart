@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../dashboard/presentation/dashboard_page.dart' show DashboardPage; // reuse Home content
 import '../patients/presentation/pages/patient_list_page.dart';
 import '../settings/presentation/pages/settings_page.dart';
+import '../appointments/presentation/appointments_page.dart';
 import '../analytics/presentation/analytics_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 // Cloud save state not shown here; no need to import the service
@@ -22,6 +23,7 @@ class _DesktopShellState extends State<DesktopShell> {
   late final List<Widget> _pages = const [
     DashboardPage(embedded: true),
     PatientListPage(),
+  AppointmentsPage(),
     AnalyticsPage(),
     SettingsPage(),
   ];
@@ -82,17 +84,23 @@ class _DesktopShellState extends State<DesktopShell> {
                       onTap: () => setState(() => _index = 1),
                     ),
                     _NavItem(
-                      icon: Icons.analytics,
-                      label: 'Analytics',
+                      icon: Icons.event,
+                      label: 'Appointments',
                       selected: _index == 2,
                       onTap: () => setState(() => _index = 2),
+                    ),
+                    _NavItem(
+                      icon: Icons.analytics,
+                      label: 'Analytics',
+                      selected: _index == 3,
+                      onTap: () => setState(() => _index = 3),
                     ),
                     
                     _NavItem(
                       icon: Icons.settings,
                       label: 'Settings',
-                      selected: _index == 3,
-                      onTap: () => setState(() => _index = 3),
+                      selected: _index == 4,
+                      onTap: () => setState(() => _index = 4),
                     ),
                     const Spacer(),
                     _ProfileTile(),

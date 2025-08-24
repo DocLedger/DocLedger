@@ -40,6 +40,13 @@ abstract class DatabaseService {
   Future<Payment?> getPayment(String paymentId);
   Future<List<Payment>> getPaymentsForPatient(String patientId);
 
+  // Appointments
+  Future<void> insertAppointment(Appointment appt);
+  Future<void> updateAppointment(Appointment appt);
+  Future<void> deleteAppointment(String appointmentId);
+  Future<Appointment?> getAppointment(String appointmentId);
+  Future<List<Appointment>> listAppointments({DateTime? from, DateTime? to, String? status});
+
   // Aggregates for dashboard
   Future<int> getPatientCount();
   Future<int> getVisitCountBetween(DateTime from, DateTime to);
@@ -66,6 +73,18 @@ class SQLiteDatabaseService implements DatabaseService {
   Database? _database;
   String? _deviceId;
   final StreamController<void> _changeController = StreamController<void>.broadcast();
+  
+  Future<void> _ensureAppointmentsColumns() async {
+    try {
+      final cols = await database.rawQuery('PRAGMA table_info(appointments)');
+      final names = cols.map((e) => (e['name'] as String?) ?? '').toSet();
+      if (!names.contains('last_modified') || !names.contains('sync_status') || !names.contains('device_id')) {
+        await DatabaseSchema.ensureAppointmentsSyncColumns(database);
+      }
+    } catch (_) {
+      // ignore; best-effort
+    }
+  }
   
   // Ensures the lightweight key/value settings table exists
   Future<void> _ensureSettingsTable() async {
@@ -102,6 +121,8 @@ class SQLiteDatabaseService implements DatabaseService {
       onCreate: DatabaseSchema.onCreate,
       onUpgrade: DatabaseSchema.onUpgrade,
     );
+  // Ensure appointments table has sync columns even if previous versions missed migration
+  try { await DatabaseSchema.ensureAppointmentsSyncColumns(database); } catch (_) {}
     // Defensive: ensure settings table exists even if older DB missed a migration
     await _ensureSettingsTable();
   }
@@ -145,7 +166,7 @@ class SQLiteDatabaseService implements DatabaseService {
     };
     
     // Export all sync-enabled tables
-    for (final tableName in DatabaseSchema.syncEnabledTables) {
+  for (final tableName in [...DatabaseSchema.syncEnabledTables, 'appointments']) {
       final records = await database.query(tableName);
       snapshot['tables'][tableName] = records;
     }
@@ -449,6 +470,80 @@ class SQLiteDatabaseService implements DatabaseService {
     );
     
     return records.map((record) => Payment.fromSyncJson(record)).toList();
+  }
+
+  // Appointment operations
+  @override
+  Future<void> insertAppointment(Appointment appt) async {
+  await _ensureAppointmentsColumns();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await database.insert('appointments', {
+      'id': appt.id,
+      'date_time': appt.dateTime.toIso8601String(),
+      'patient_id': appt.patientId,
+      'name': appt.name,
+      'phone': appt.phone,
+      'note': appt.note,
+      'status': appt.status,
+      'created_at': now,
+      'updated_at': now,
+      'last_modified': appt.lastModified.millisecondsSinceEpoch,
+      'sync_status': appt.syncStatus,
+      'device_id': appt.deviceId,
+    });
+    notifyDataChanged();
+  }
+
+  @override
+  Future<void> updateAppointment(Appointment appt) async {
+  await _ensureAppointmentsColumns();
+    await database.update(
+      'appointments',
+      {
+        'date_time': appt.dateTime.toIso8601String(),
+        'patient_id': appt.patientId,
+        'name': appt.name,
+        'phone': appt.phone,
+        'note': appt.note,
+        'status': appt.status,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+        'last_modified': appt.lastModified.millisecondsSinceEpoch,
+        'sync_status': appt.syncStatus,
+        'device_id': appt.deviceId,
+      },
+      where: 'id = ?',
+      whereArgs: [appt.id],
+    );
+    notifyDataChanged();
+  }
+
+  @override
+  Future<void> deleteAppointment(String appointmentId) async {
+    await database.delete('appointments', where: 'id = ?', whereArgs: [appointmentId]);
+    notifyDataChanged();
+  }
+
+  @override
+  Future<Appointment?> getAppointment(String appointmentId) async {
+    final res = await database.query('appointments', where: 'id = ?', whereArgs: [appointmentId], limit: 1);
+    if (res.isEmpty) return null;
+    return Appointment.fromSyncJson(res.first);
+  }
+
+  @override
+  Future<List<Appointment>> listAppointments({DateTime? from, DateTime? to, String? status}) async {
+    final where = <String>[];
+    final args = <Object?>[];
+    if (from != null) { where.add('date_time >= ?'); args.add(from.toIso8601String()); }
+    if (to != null) { where.add('date_time <= ?'); args.add(to.toIso8601String()); }
+    if (status != null) { where.add('status = ?'); args.add(status); }
+    final res = await database.query(
+      'appointments',
+      where: where.isEmpty ? null : where.join(' AND '),
+      whereArgs: where.isEmpty ? null : args,
+      orderBy: 'date_time ASC',
+    );
+    return res.map((e) => Appointment.fromSyncJson(e)).toList();
   }
 
   // Dashboard aggregates

@@ -139,6 +139,42 @@ class DataRepository {
     }
   }
 
+  // Appointment operations
+  Future<void> addAppointment(Appointment appt) async {
+    try {
+      await _database.insertAppointment(appt);
+      _triggerSync();
+    } catch (e) {
+      throw DataRepositoryException('Failed to add appointment: $e');
+    }
+  }
+
+  Future<void> updateAppointment(Appointment appt) async {
+    try {
+      await _database.updateAppointment(appt);
+      _triggerSync();
+    } catch (e) {
+      throw DataRepositoryException('Failed to update appointment: $e');
+    }
+  }
+
+  Future<void> deleteAppointment(String id) async {
+    try {
+      await _database.deleteAppointment(id);
+      _triggerSync();
+    } catch (e) {
+      throw DataRepositoryException('Failed to delete appointment: $e');
+    }
+  }
+
+  Future<List<Appointment>> getAppointments({DateTime? from, DateTime? to, String? status}) async {
+    try {
+      return await _database.listAppointments(from: from, to: to, status: status);
+    } catch (e) {
+      throw DataRepositoryException('Failed to load appointments: $e');
+    }
+  }
+
   // Sync operations
 
   /// Gets the count of pending sync operations

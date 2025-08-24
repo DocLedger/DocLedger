@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/data/repositories/data_repository.dart';
 import '../../../core/services/service_locator.dart';
 import '../../../core/data/models/data_models.dart' as models;
+import '../../appointments/presentation/appointments_page.dart' show showNewAppointmentDialog;
 
 class DashboardPage extends StatelessWidget {
   final bool embedded; // true when placed inside shells which provide chrome
@@ -22,12 +23,14 @@ class DashboardPage extends StatelessWidget {
           repo.getPatientCount(),
           repo.getTodayVisitCount(),
           repo.getPendingFollowUpsCount(),
+          _todayAppointmentsCount(repo),
         ]),
         builder: (context, snapshot) {
           final data = snapshot.data;
           final patients = data != null ? data[0] as int : 0;
           final todayVisits = data != null ? data[1] as int : 0;
           final pendingFollowUps = data != null ? data[2] as int : 0;
+          final todayAppts = data != null ? data[3] as int : 0;
 
           // A single-row metric: icon + title on the left, number on the right.
       Widget metricRow(String title, String value, IconData icon) => Padding(
@@ -69,6 +72,8 @@ class DashboardPage extends StatelessWidget {
               children: [
                 metricRow('Total Patients', patients.toString(), Icons.people),
                 const Divider(height: 1, thickness: 1),
+                metricRow('Appointments Today', todayAppts.toString(), Icons.event),
+                const Divider(height: 1, thickness: 1),
                 metricRow("Patient Visits Today", todayVisits.toString(), Icons.event_available),
                 const Divider(height: 1, thickness: 1),
                 metricRow('Follow-ups (7d)', pendingFollowUps.toString(), Icons.schedule),
@@ -80,6 +85,8 @@ class DashboardPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(child: metricRow('Total Patients', patients.toString(), Icons.people)),
+                const Divider(height: 1, thickness: 1),
+                Expanded(child: metricRow('Appointments Today', todayAppts.toString(), Icons.event)),
                 const Divider(height: 1, thickness: 1),
                 Expanded(child: metricRow("Patient Visits Today", todayVisits.toString(), Icons.event_available)),
                 const Divider(height: 1, thickness: 1),
@@ -225,6 +232,26 @@ class DashboardPage extends StatelessWidget {
         title: const Text('Dashboard'),
         centerTitle: false,
         actions: [
+          Builder(builder: (context) {
+            final cs = Theme.of(context).colorScheme;
+            return OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: cs.primary.withValues(alpha: 0.35)),
+                foregroundColor: cs.primary,
+                backgroundColor: cs.primary.withValues(alpha: 0.10),
+              ),
+              onPressed: () async {
+                // Open the same dialog used on Appointments page
+                final res = await showNewAppointmentDialog(context);
+                if (res == true && context.mounted) {
+                  // After save, take user to Appointments page
+                  Navigator.of(context).pushNamed('/appointments');
+                }
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('New Appointment'),
+            );
+          }),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: _SyncStatusIcon(repo: repo),
@@ -234,6 +261,18 @@ class DashboardPage extends StatelessWidget {
       ),
       body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: body),
     );
+  }
+}
+
+Future<int> _todayAppointmentsCount(DataRepository repo) async {
+  final now = DateTime.now();
+  final start = DateTime(now.year, now.month, now.day);
+  final end = start.add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
+  try {
+    final list = await repo.getAppointments(from: start, to: end);
+    return list.length;
+  } catch (_) {
+    return 0;
   }
 }
 

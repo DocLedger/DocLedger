@@ -2,7 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 /// Database schema definitions and migration scripts for sync-enabled DocLedger
 class DatabaseSchema {
-  static const int currentVersion = 3;
+  static const int currentVersion = 5;
   static const String databaseName = 'docledger.db';
 
   /// Initial database schema creation (version 1)
@@ -52,6 +52,22 @@ class DatabaseSchema {
     )
   ''';
 
+  // Appointments table (simple and optional link to patient)
+  static const String createAppointmentsTable = '''
+    CREATE TABLE appointments (
+      id TEXT PRIMARY KEY,
+      date_time TEXT NOT NULL,
+      patient_id TEXT,
+      name TEXT,
+      phone TEXT,
+      note TEXT,
+      status TEXT NOT NULL DEFAULT 'Scheduled',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (patient_id) REFERENCES patients (id) ON DELETE SET NULL
+    )
+  ''';
+
   /// Sync tracking columns migration (version 2)
   static const String addSyncColumnsToPatients = '''
     ALTER TABLE patients ADD COLUMN last_modified INTEGER DEFAULT 0
@@ -97,6 +113,17 @@ class DatabaseSchema {
     ALTER TABLE payments ADD COLUMN device_id TEXT DEFAULT ''
   ''';
 
+  // Appointments sync columns
+  static const String addSyncColumnsToAppointments = '''
+    ALTER TABLE appointments ADD COLUMN last_modified INTEGER DEFAULT 0
+  ''';
+  static const String addSyncStatusToAppointments = '''
+    ALTER TABLE appointments ADD COLUMN sync_status TEXT DEFAULT 'pending'
+  ''';
+  static const String addDeviceIdToAppointments = '''
+    ALTER TABLE appointments ADD COLUMN device_id TEXT DEFAULT ''
+  ''';
+
   // Simplified - no complex sync metadata table needed
 
   /// Settings table for storing application settings
@@ -124,6 +151,11 @@ class DatabaseSchema {
     'CREATE INDEX idx_payments_last_modified ON payments (last_modified)',
     'CREATE INDEX idx_payments_device_id ON payments (device_id)',
     'CREATE INDEX idx_payments_patient_id ON payments (patient_id)',
+  // Appointments
+  'CREATE INDEX idx_appointments_date_time ON appointments (date_time)',
+  'CREATE INDEX idx_appointments_patient_id ON appointments (patient_id)',
+  'CREATE INDEX idx_appointments_status ON appointments (status)',
+  'CREATE INDEX idx_appointments_last_modified ON appointments (last_modified)',
     
     // Indexes for conflict resolution (table may not exist in simplified model)
     'CREATE INDEX IF NOT EXISTS idx_sync_conflicts_table_record ON sync_conflicts (table_name, record_id)',
@@ -149,6 +181,9 @@ class DatabaseSchema {
       '''INSERT OR IGNORE INTO sync_metadata 
          (table_name, created_at, updated_at) 
          VALUES ('payments', $now, $now)''',
+  '''INSERT OR IGNORE INTO sync_metadata 
+     (table_name, created_at, updated_at) 
+     VALUES ('appointments', $now, $now)''',
     ];
   }
 
@@ -178,6 +213,12 @@ class DatabaseSchema {
     }
     if (oldVersion < 3) {
       await _migrateToVersion3(db);
+    }
+    if (oldVersion < 4) {
+      await _migrateToVersion4(db);
+    }
+    if (oldVersion < 5) {
+      await _migrateToVersion5(db);
     }
   }
 
@@ -272,17 +313,84 @@ class DatabaseSchema {
     try { await db.execute(createSettingsTable); } catch (_) {}
   }
 
+  static Future<void> _migrateToVersion4(Database db) async {
+    try { await db.execute(createAppointmentsTable); } catch (_) {}
+    try { await db.execute(addSyncColumnsToAppointments); } catch (_) {}
+    try { await db.execute(addSyncStatusToAppointments); } catch (_) {}
+    try { await db.execute(addDeviceIdToAppointments); } catch (_) {}
+
+    for (final index in [
+      'CREATE INDEX IF NOT EXISTS idx_appointments_date_time ON appointments (date_time)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_patient_id ON appointments (patient_id)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments (status)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_last_modified ON appointments (last_modified)',
+    ]) {
+      try { await db.execute(index); } catch (_) {}
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.execute('''INSERT OR IGNORE INTO sync_metadata 
+       (table_name, created_at, updated_at) 
+       VALUES ('appointments', $now, $now)''');
+  }
+
   /// Database creation handler
   static Future<void> onCreate(Database db, int version) async {
     // Create base tables
     await db.execute(createPatientsTable);
     await db.execute(createVisitsTable);
     await db.execute(createPaymentsTable);
+  await db.execute(createAppointmentsTable);
     await db.execute(createSettingsTable);
 
     // If creating at version 2 or higher, add sync features
-    if (version >= 2) {
-      await _migrateToVersion2(db);
+  // Note: when a database is created directly at a higher schema version,
+  // onUpgrade is NOT called. We must apply all migrations up to `version` here.
+    if (version >= 2) await _migrateToVersion2(db);
+    if (version >= 3) await _migrateToVersion3(db);
+    if (version >= 4) await _migrateToVersion4(db);
+    if (version >= 5) await _migrateToVersion5(db);
+  }
+
+  /// Defensive migration to ensure appointments table has sync columns on existing installs
+  static Future<void> _migrateToVersion5(Database db) async {
+    // Ensure appointments table exists
+    try { await db.execute(createAppointmentsTable); } catch (_) {}
+    // Add sync columns if missing (ignore errors if already exist)
+    try { await db.execute(addSyncColumnsToAppointments); } catch (_) {}
+    try { await db.execute(addSyncStatusToAppointments); } catch (_) {}
+    try { await db.execute(addDeviceIdToAppointments); } catch (_) {}
+
+    // Ensure indexes
+    for (final index in [
+      'CREATE INDEX IF NOT EXISTS idx_appointments_date_time ON appointments (date_time)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_patient_id ON appointments (patient_id)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments (status)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_last_modified ON appointments (last_modified)',
+    ]) {
+      try { await db.execute(index); } catch (_) {}
+    }
+
+    // Ensure sync_metadata row exists
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.execute('''INSERT OR IGNORE INTO sync_metadata 
+       (table_name, created_at, updated_at) 
+       VALUES ('appointments', $now, $now)''');
+  }
+
+  /// Public helper: ensure appointments table has required sync columns and indexes.
+  static Future<void> ensureAppointmentsSyncColumns(Database db) async {
+    // Attempt to add columns; ignore failures if they already exist
+    try { await db.execute(addSyncColumnsToAppointments); } catch (_) {}
+    try { await db.execute(addSyncStatusToAppointments); } catch (_) {}
+    try { await db.execute(addDeviceIdToAppointments); } catch (_) {}
+    for (final index in [
+      'CREATE INDEX IF NOT EXISTS idx_appointments_date_time ON appointments (date_time)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_patient_id ON appointments (patient_id)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments (status)',
+      'CREATE INDEX IF NOT EXISTS idx_appointments_last_modified ON appointments (last_modified)',
+    ]) {
+      try { await db.execute(index); } catch (_) {}
     }
   }
 
@@ -311,19 +419,20 @@ class DatabaseSchema {
 
   /// Get all table names that support sync
   static List<String> get syncEnabledTables => ['patients', 'visits', 'payments'];
+  static List<String> get allTables => ['patients', 'visits', 'payments', 'appointments'];
 
   /// Validate database schema integrity
   static Future<bool> validateSchema(Database db) async {
     try {
       // Check if all required tables exist
       final tables = await db.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('patients', 'visits', 'payments', 'sync_metadata', 'sync_conflicts')"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('patients', 'visits', 'payments', 'appointments', 'sync_metadata', 'sync_conflicts')"
       );
       
-      if (tables.length != 5) return false;
+      if (tables.length != 6) return false;
 
       // Check if sync columns exist in main tables
-      for (final tableName in syncEnabledTables) {
+  for (final tableName in [...syncEnabledTables, 'appointments']) {
         final columns = await db.rawQuery("PRAGMA table_info($tableName)");
         final columnNames = columns.map((col) => col['name'] as String).toSet();
         

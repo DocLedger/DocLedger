@@ -10,6 +10,7 @@ import 'features/dashboard/presentation/dashboard_page.dart';
 import 'features/subscription/presentation/pages/subscription_page.dart';
 import 'theme/app_theme.dart';
 import 'features/patients/presentation/pages/patient_detail_page.dart';
+import 'features/appointments/presentation/appointments_page.dart';
 import 'features/visits/presentation/visit_form_page.dart';
 import 'features/shell/adaptive_shell.dart';
 import 'features/analytics/presentation/analytics_page.dart';
@@ -51,6 +52,9 @@ class DocLedgerApp extends StatelessWidget {
         // For pages with arguments, use onGenerateRoute when needed.
       },
       onGenerateRoute: (settings) {
+    if (settings.name == AppointmentsPage.routeName) {
+      return MaterialPageRoute(builder: (_) => const AppointmentsPage());
+    }
         if (settings.name == PatientDetailPage.routeName && settings.arguments is PatientDetailArgs) {
           final args = settings.arguments as PatientDetailArgs;
           return MaterialPageRoute(builder: (_) => PatientDetailPage(patient: args.patient));

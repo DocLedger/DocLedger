@@ -393,6 +393,119 @@ class Payment implements SyncableModel {
   }
 }
 
+/// Appointment model with sync capabilities (can be linked to a patient later)
+class Appointment implements SyncableModel {
+  final String id;
+  final DateTime dateTime;
+  final String? patientId;
+  final String? name; // captured if no patient yet
+  final String? phone; // captured if no patient yet
+  final String? note;
+  final String status; // Scheduled | Completed | NoShow | Canceled
+  final DateTime lastModified;
+  final String syncStatus;
+  final String deviceId;
+
+  const Appointment({
+    required this.id,
+    required this.dateTime,
+    this.patientId,
+    this.name,
+    this.phone,
+    this.note,
+    this.status = 'Scheduled',
+    required this.lastModified,
+    this.syncStatus = 'pending',
+    required this.deviceId,
+  });
+
+  @override
+  Map<String, dynamic> toSyncJson() {
+    return {
+      'id': id,
+      'date_time': dateTime.toIso8601String(),
+      'patient_id': patientId,
+      'name': name,
+      'phone': phone,
+      'note': note,
+      'status': status,
+      'last_modified': lastModified.millisecondsSinceEpoch,
+      'sync_status': syncStatus,
+      'device_id': deviceId,
+    };
+  }
+
+  static Appointment fromSyncJson(Map<String, dynamic> json) {
+    return Appointment(
+      id: json['id'] as String,
+      dateTime: DateTime.parse(json['date_time'] as String),
+      patientId: json['patient_id'] as String?,
+      name: json['name'] as String?,
+      phone: json['phone'] as String?,
+      note: json['note'] as String?,
+      status: json['status'] as String? ?? 'Scheduled',
+      lastModified: DateTime.fromMillisecondsSinceEpoch(json['last_modified'] as int),
+      syncStatus: json['sync_status'] as String? ?? 'pending',
+      deviceId: json['device_id'] as String,
+    );
+  }
+
+  @override
+  Appointment updateSyncMetadata({
+    String? syncStatus,
+    String? deviceId,
+    DateTime? lastModified,
+  }) {
+    return Appointment(
+      id: id,
+      dateTime: dateTime,
+      patientId: patientId,
+      name: name,
+      phone: phone,
+      note: note,
+      status: status,
+      lastModified: lastModified ?? DateTime.now(),
+      syncStatus: syncStatus ?? this.syncStatus,
+      deviceId: deviceId ?? this.deviceId,
+    );
+  }
+
+  Appointment copyWith({
+    String? id,
+    DateTime? dateTime,
+    String? patientId,
+    String? name,
+    String? phone,
+    String? note,
+    String? status,
+    DateTime? lastModified,
+    String? syncStatus,
+    String? deviceId,
+  }) {
+    return Appointment(
+      id: id ?? this.id,
+      dateTime: dateTime ?? this.dateTime,
+      patientId: patientId ?? this.patientId,
+      name: name ?? this.name,
+      phone: phone ?? this.phone,
+      note: note ?? this.note,
+      status: status ?? this.status,
+      lastModified: lastModified ?? this.lastModified,
+      syncStatus: syncStatus ?? this.syncStatus,
+      deviceId: deviceId ?? this.deviceId,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is Appointment && other.id == id;
+  }
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
 /// Enum for different types of sync conflicts
 enum ConflictType {
   updateConflict,
