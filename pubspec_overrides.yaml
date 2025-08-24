@@ -1,6 +1,9 @@
-# Local-only overrides for Linux desktop development
-# This file is not required for Android/Windows builds.
-# If you build Android on this machine, temporarily rename this file.
+## Linux-only development override
+## IMPORTANT: Do NOT use this override when building/running on Android.
+## If you run Android with this file present, login persistence will break.
+## To keep Linux desktop dev working while Android uses the real plugin,
+## we scope the override via platform-specific condition using flavors or
+## by instructing developers to rename this file when building Android.
 
 dependency_overrides:
   flutter_secure_storage:

@@ -56,6 +56,9 @@ abstract class DatabaseService {
   Future<void> insertRecord(String tableName, Map<String, dynamic> record);
   Future<Map<String, dynamic>?> getSettings(String key);
   Future<void> saveSettings(String key, Map<String, dynamic> settings);
+
+  /// Notify listeners that significant data has changed (e.g., after a restore).
+  void notifyDataChanged();
 }
 
 /// SQLite implementation of DatabaseService with sync support
@@ -123,6 +126,13 @@ class SQLiteDatabaseService implements DatabaseService {
     // For now, always return true to trigger saves
     // In a more sophisticated implementation, you could track actual changes
     return true;
+  }
+
+  @override
+  void notifyDataChanged() {
+    if (!_changeController.isClosed) {
+      _changeController.add(null);
+    }
   }
   
   @override

@@ -338,7 +338,7 @@ class RestoreService {
   /// Get list of available backups with validation
   Future<List<RestoreBackupInfo>> _getAvailableBackups() async {
     try {
-      final files = await _backupService.listBackups(_clinicId);
+  final files = await _backupService.listBackups();
       final restoreBackups = <RestoreBackupInfo>[];
 
       for (final file in files) {
@@ -415,9 +415,9 @@ class RestoreService {
       final parsed = jsonDecode(utf8.decode(encryptedBytes)) as Map<String, dynamic>;
       final encryptedData = EncryptedData.fromJson(parsed);
 
-      // Strict: only username-based shared key
-      final usernameForKey = await _backupService.getCurrentUsernameFolder();
-      final userKey = await _encryption.deriveEncryptionKey(usernameForKey, usernameForKey);
+  // Clinic-based shared key
+  final clinicKeyId = await _backupService.getCurrentClinicId();
+  final userKey = await _encryption.deriveEncryptionKey(clinicKeyId, clinicKeyId);
       return await _encryption.decryptData(encryptedData, userKey);
     } catch (e) {
       throw RestoreException(

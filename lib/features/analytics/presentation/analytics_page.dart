@@ -185,7 +185,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: color.outlineVariant.withValues(alpha: 0.3)),
                 ),
-                padding: const EdgeInsets.all(12),
+                // Slightly reduce internal padding so the chart axes have
+                // near-equal space on all sides inside the card
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 child: _loading
                     ? const Center(child: CircularProgressIndicator())
                     : SizedBox.expand(
@@ -214,6 +216,13 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.outlineVariant.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -379,10 +388,12 @@ class _TwoSeriesPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-  final left = 44.0;
-  final right = 12.0;
-  final top = 20.0;
-  final bottom = 36.0;
+  // Balanced paddings so axis lines feel evenly spaced within the card
+  // while still reserving room for x‑labels and legend.
+  final left = 35.0;
+  final right = 35.0;
+  final top = 35.0;
+  final bottom = 35.0;
   final chartRect = Rect.fromLTWH(left, top, size.width - left - right, size.height - top - bottom);
 
     // Axes
@@ -401,7 +412,7 @@ class _TwoSeriesPainter extends CustomPainter {
 
     // Gridlines (4)
     final gridPaint = Paint()
-      ..color = colorScheme.outlineVariant.withValues(alpha: 0.2)
+  ..color = colorScheme.outlineVariant.withValues(alpha: 0.18)
       ..strokeWidth = 1;
     for (int i = 1; i <= 4; i++) {
       final y = chartRect.bottom - (chartRect.height * (i / 4));
@@ -409,17 +420,26 @@ class _TwoSeriesPainter extends CustomPainter {
     }
 
     // Plot function
-    void drawSeries(List<double> s, Color col) {
+  void drawSeries(List<double> s, Color col, int order) {
       if (s.isEmpty) return;
       final dx = chartRect.width / (s.length - 1).clamp(1, 1000000);
       final path = Path();
-      for (int i = 0; i < s.length; i++) {
-        final x = chartRect.left + dx * i;
-        final y = chartRect.bottom - (s[i] / safeMax) * chartRect.height;
-        if (i == 0) {
-          path.moveTo(x, y);
-        } else {
-          path.lineTo(x, y);
+      if (s.length == 1) {
+    // 1‑day case: draw centered horizontal lines (slightly separated per series)
+    final center = chartRect.top + chartRect.height * 0.5;
+    final spread = 10.0; // vertical separation between A and B
+    double yVal = order == 0 ? center - spread / 2 : center + spread / 2;
+        path.moveTo(chartRect.left, yVal);
+        path.lineTo(chartRect.right, yVal);
+      } else {
+        for (int i = 0; i < s.length; i++) {
+          final x = chartRect.left + dx * i;
+          final y = chartRect.bottom - (s[i] / safeMax) * chartRect.height;
+          if (i == 0) {
+            path.moveTo(x, y);
+          } else {
+            path.lineTo(x, y);
+          }
         }
       }
       final paint = Paint()
@@ -429,15 +449,23 @@ class _TwoSeriesPainter extends CustomPainter {
       canvas.drawPath(path, paint);
       // End dots
       final dotPaint = Paint()..color = col;
-      for (int i = 0; i < s.length; i++) {
-        final x = chartRect.left + dx * i;
-        final y = chartRect.bottom - (s[i] / safeMax) * chartRect.height;
-        canvas.drawCircle(Offset(x, y), 2.5, dotPaint);
+      if (s.length == 1) {
+    // Put a single dot at the right edge for visibility, matching the centered line
+    final center = chartRect.top + chartRect.height * 0.5;
+    final spread = 10.0;
+    final y = order == 0 ? center - spread / 2 : center + spread / 2;
+    canvas.drawCircle(Offset(chartRect.right, y), 3, dotPaint);
+      } else {
+        for (int i = 0; i < s.length; i++) {
+          final x = chartRect.left + dx * i;
+          final y = chartRect.bottom - (s[i] / safeMax) * chartRect.height;
+          canvas.drawCircle(Offset(x, y), 2.5, dotPaint);
+        }
       }
     }
 
-    drawSeries(seriesA, colorScheme.primary.withValues(alpha: 0.9));
-    drawSeries(seriesB, colorScheme.tertiary.withValues(alpha: 0.9));
+  drawSeries(seriesA, colorScheme.primary.withValues(alpha: 0.9), 0);
+  drawSeries(seriesB, colorScheme.tertiary.withValues(alpha: 0.9), 1);
 
     // X labels (sparse)
     final tp = TextPainter(textDirection: TextDirection.ltr);
@@ -445,21 +473,23 @@ class _TwoSeriesPainter extends CustomPainter {
     final step = (xLabels.length / tickCount).ceil();
     for (int i = 0; i < xLabels.length; i += step) {
       final label = xLabels[i];
-      tp.text = TextSpan(text: label, style: const TextStyle(fontSize: 10, color: Colors.grey));
+      tp.text = TextSpan(text: label, style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant));
       tp.layout();
       final dx = chartRect.width / (xLabels.length - 1).clamp(1, 1000000);
-      final x = chartRect.left + dx * i - tp.width / 2;
+      final x = (xLabels.length == 1)
+          ? (chartRect.left + chartRect.width / 2 - tp.width / 2)
+          : (chartRect.left + dx * i - tp.width / 2);
       final y = chartRect.bottom + 6;
       tp.paint(canvas, Offset(x, y));
     }
 
     // Legend
-  final legendY = chartRect.top - 10;
+  final legendY = chartRect.top - 6;
     void legendDot(double x, Color c, String text) {
       final p = Paint()..color = c;
       canvas.drawCircle(Offset(x, legendY), 4, p);
       final t = TextPainter(
-        text: TextSpan(text: ' $text', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+  text: TextSpan(text: ' $text', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
         textDirection: TextDirection.ltr,
       )..layout();
       t.paint(canvas, Offset(x + 6, legendY - t.height / 2));

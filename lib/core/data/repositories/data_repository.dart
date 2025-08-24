@@ -163,7 +163,10 @@ class DataRepository {
     // Schedule sync in the background without blocking the UI
     Future.microtask(() async {
       try {
-        await _cloudSaveService.saveNow();
+        // Honor user's Auto-Save setting; skip background saves when disabled
+        if (_cloudSaveService.autoSaveEnabled) {
+          await _cloudSaveService.saveNow();
+        }
       } catch (e) {
         // Log error but don't throw - sync failures shouldn't break data operations
         print('Background sync failed: $e');

@@ -42,14 +42,13 @@ class PatientListItem extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(patient.phone, style: const TextStyle(fontSize: 15)),
-            if (patient.dateOfBirth != null)
-              Text(
-                'DOB: ${_formatDate(patient.dateOfBirth!)}',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey[600],
-                ),
+            Text(
+              'DOB: ${patient.dateOfBirth != null ? _formatDate(patient.dateOfBirth!) : '-'}',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey[600],
               ),
+            ),
             // No sync/conflict indicators on list items
           ],
         ),
@@ -85,12 +84,12 @@ class _TrailingStatus extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
+    Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.12),
+      color: Colors.orange.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.orange.withOpacity(0.3)),
+      border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
           ),
           child: Text('Due Rs.${due.toStringAsFixed(0)}', style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.w600)),
         ),

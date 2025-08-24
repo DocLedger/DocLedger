@@ -50,6 +50,8 @@ class CloudSaveService {
   // Debouncing for auto-save
   Timer? _autoSaveTimer;
   static const Duration _autoSaveDelay = Duration(seconds: 30);
+  // Subscription to DB changes (used for both auto-save scheduling and sync status refresh)
+  StreamSubscription? _changesSubscription;
   
   // Periodic sync
   Timer? _periodicSyncTimer;
@@ -94,6 +96,7 @@ class CloudSaveService {
   /// Dispose resources
   void dispose() {
     _autoSaveTimer?.cancel();
+  _changesSubscription?.cancel();
     _periodicSyncTimer?.cancel();
     _stateController.close();
   }
@@ -103,20 +106,17 @@ class CloudSaveService {
     try {
       // Load saved settings
       await _loadSettings();
-      // If not linked, keep auto-save disabled to avoid unnecessary attempts
-      if (!await _backup.isReady()) {
-        _autoSaveEnabled = false;
-      }
       _log('initialize: autoSaveEnabled=' + _autoSaveEnabled.toString());
       
       // Set initial state
       final lastSaveTime = await _getLastSaveTime();
       _updateState(CloudSaveState.idle(lastSaveTime: lastSaveTime));
       
-      // Start listening for data changes if auto-save is enabled and account is linked
-      if (_autoSaveEnabled && await _backup.isReady()) {
-        _startAutoSaveListener();
-      }
+  // Start listening for data changes (always). The listener will
+  // conditionally schedule auto-save based on _autoSaveEnabled, but will
+  // always refresh the sync status so the manual Sync button reflects
+  // local changes even when auto-save is OFF.
+  _startAutoSaveListener();
       // Schedule periodic sync check
       _periodicSyncTimer?.cancel();
       _periodicSyncTimer = Timer.periodic(_periodicSyncInterval, (_) async {
@@ -143,49 +143,75 @@ class CloudSaveService {
       if (!await _backup.isReady()) {
         _shouldEnableSync = false;
         _log('refreshSyncStatus: not linked');
-        return;
+  // Notify listeners so UI can reflect disabled sync button
+  try { _stateController.add(_currentState); } catch (_) {}
+  return;
       }
-      // Consider any .enc backup under the user folder
-      var latest = await _backup.getLatestBackup(null);
+      // Consider any .enc backup under the clinic folder
+      var latest = await _backup.getLatestBackup();
       // Fallback: list all and take most recent if direct latest lookup fails
       if (latest == null) {
-        final all = await _backup.listBackups(null);
+        final all = await _backup.listBackups();
         if (all.isNotEmpty) {
           latest = all.first;
         }
       }
       final lastSaveTime = await _getLastSaveTime();
       if (latest == null) {
-        // No cloud backup yet: enable sync if we have data
         _shouldEnableSync = true;
         _log('refreshSyncStatus: no cloud backup found; enabling sync');
-        return;
+  try { _stateController.add(_currentState); } catch (_) {}
+  return;
       }
       if (lastSaveTime == null) {
         _shouldEnableSync = true;
         _log('refreshSyncStatus: have cloud backup, local has no lastSaveTime; enabling sync');
-        return;
+  try { _stateController.add(_currentState); } catch (_) {}
+  return;
       }
-      // Enable if cloud newer than local or local changed since last save
-      _shouldEnableSync = latest.modifiedTime.isAfter(lastSaveTime);
-      _log('refreshSyncStatus: cloud=' + latest.modifiedTime.toIso8601String() + ' local=' + lastSaveTime.toIso8601String() + ' enable=' + _shouldEnableSync.toString());
+  // Consider minor clock differences equal (avoid flapping after a save)
+  final diffSeconds = latest.modifiedTime.difference(lastSaveTime).inSeconds;
+  final withinTolerance = diffSeconds.abs() <= 10;
+  // Enable when either direction differs. If auto-save is OFF, be more
+  // permissive and enable even within tolerance so the user can manually
+  // sync right after edits. If auto-save is ON, require difference beyond
+  // tolerance to avoid immediate re-sync after a save.
+  final anyDifference = diffSeconds != 0;
+  _shouldEnableSync = _autoSaveEnabled ? (!withinTolerance && anyDifference) : anyDifference;
+      _log('refreshSyncStatus: cloud=' + latest.modifiedTime.toIso8601String() + ' local=' + lastSaveTime.toIso8601String() + ' deltaSec=' + diffSeconds.toString() + ' enable=' + _shouldEnableSync.toString());
+  // Emit a benign state to trigger UI rebuild with the new shouldEnableSync value
+  try { _stateController.add(_currentState); } catch (_) {}
     } catch (_) {
       _shouldEnableSync = false;
+  try { _stateController.add(_currentState); } catch (_) {}
     }
   }
 
   /// One-click sync: decides to upload or restore based on timestamps
   Future<CloudSaveResult> syncNow() async {
     try {
+      // Emit an early determinate state so the UI shows progress immediately
+      _updateState(CloudSaveState.saving(
+        progress: 0.01,
+        currentOperation: 'Checking cloud...',
+      ));
+
       await refreshSyncStatus();
       if (!await _backup.isReady()) {
         _log('syncNow: not linked');
+        // Reset UI state to idle to avoid a stuck progress indicator
+        try {
+          final last = await _getLastSaveTime();
+          _updateState(CloudSaveState.idle(lastSaveTime: last));
+        } catch (_) {
+          _updateState(CloudSaveState.idle(lastSaveTime: null));
+        }
         return CloudSaveResult.failure('Not linked to cloud storage');
       }
-      // Consider any .enc backup under the user folder
-      var latest = await _backup.getLatestBackup(null);
+      // Consider any .enc backup under the clinic folder
+      var latest = await _backup.getLatestBackup();
       if (latest == null) {
-        final all = await _backup.listBackups(null);
+        final all = await _backup.listBackups();
         if (all.isNotEmpty) {
           latest = all.first;
         }
@@ -195,6 +221,13 @@ class CloudSaveService {
         // No cloud backup detected: avoid creating an empty backup if local DB is empty
         if (!await _hasAnyLocalData()) {
           _log('syncNow: no cloud backup and local empty -> failure');
+          // Reset UI state to idle to avoid a stuck progress indicator
+          try {
+            final last = await _getLastSaveTime();
+            _updateState(CloudSaveState.idle(lastSaveTime: last));
+          } catch (_) {
+            _updateState(CloudSaveState.idle(lastSaveTime: null));
+          }
           return CloudSaveResult.failure('No cloud backup found to restore');
         }
         _log('syncNow: no cloud backup but local has data -> save');
@@ -207,6 +240,13 @@ class CloudSaveService {
       _log('syncNow: saving (local up-to-date). cloud=' + latest.modifiedTime.toIso8601String() + ' local=' + lastSaveTime.toIso8601String());
       return await saveNow();
     } catch (e) {
+      // Reset UI state to idle to avoid a stuck progress indicator
+      try {
+        final last = await _getLastSaveTime();
+        _updateState(CloudSaveState.idle(lastSaveTime: last));
+      } catch (_) {
+        _updateState(CloudSaveState.idle(lastSaveTime: null));
+      }
       return CloudSaveResult.failure(e.toString());
     }
   }
@@ -216,11 +256,15 @@ class CloudSaveService {
     _autoSaveEnabled = enabled;
     await _saveSettings();
     
-    if (enabled) {
-      _startAutoSaveListener();
-    } else {
+    // Keep the change listener always running; it conditionally queues
+    // auto-saves. When disabling auto-save, just cancel any pending timer so
+    // no background uploads happen, but still refresh sync status on new
+    // changes so the manual Sync button reflects them.
+    if (!enabled) {
       _stopAutoSaveListener();
     }
+    // Recompute sync status immediately to reflect new policy
+    try { await refreshSyncStatus(); } catch (_) {}
   }
 
   /// Update WiFi-only mode setting
@@ -287,10 +331,10 @@ class CloudSaveService {
         },
       );
       
-      // Step 3: Encrypt data
-      // Use username-based shared key so any device logged as the same user can decrypt
-      final usernameFolder = await _backup.getCurrentUsernameFolder();
-      final encryptionKey = await _encryption.deriveEncryptionKey(usernameFolder, usernameFolder);
+  // Step 3: Encrypt data
+  // Use clinic-based shared key so any authorized clinic user can decrypt
+  final clinicKeyId = await _backup.getCurrentClinicId();
+  final encryptionKey = await _encryption.deriveEncryptionKey(clinicKeyId, clinicKeyId);
       final encryptedData = await _encryption.encryptData(saveData.toJson(), encryptionKey);
       final payloadBytes = utf8.encode(jsonEncode(encryptedData.toJson()));
       
@@ -300,10 +344,12 @@ class CloudSaveService {
         currentOperation: 'Uploading to cloud',
       ));
       
-      final fileName = _generateSaveFileName(usernameFolder);
-      _log('saveNow: uploading file ' + fileName + ' to folder ' + usernameFolder);
+  final fileName = _generateSaveFileName(clinicKeyId);
+      _log('saveNow: uploading file ' + fileName + ' to clinic folder ' + clinicKeyId);
+  // Ensure folder exists to prevent 409/404 on PUT
+  await _backup.ensureClinicFolder(clinicKeyId);
       await _backup.uploadBackupFile(
-        usernameFolder: usernameFolder,
+        clinicId: clinicKeyId,
         fileName: fileName,
         bytes: Uint8List.fromList(payloadBytes),
         onProgress: (sent, total) {
@@ -324,8 +370,8 @@ class CloudSaveService {
         currentOperation: 'Cleaning up old saves',
       ));
       
-      // Do not strictly filter by clinic id here; keep-by-count within user folder
-      await _backup.cleanupOldBackups(usernameFolder, keep: 10, clinicId: null);
+  // Keep-by-count within clinic folder
+  await _backup.cleanupOldBackups(clinicKeyId, keep: 10);
       
       // Step 6: Update metadata
       await _updateSaveMetadata();
@@ -344,12 +390,19 @@ class CloudSaveService {
       
       final now = DateTime.now();
       _updateState(CloudSaveState.idle(lastSaveTime: now));
+
+      // Notify that data-related metadata changed (e.g., last saved time)
+      try {
+        _database.notifyDataChanged();
+      } catch (_) {}
       
       // Show notification if enabled
       if (_showNotifications) {
         _showSaveNotification('Data saved to cloud successfully');
       }
-      
+  // Immediately recompute sync enable state for the UI
+  try { await refreshSyncStatus(); } catch (_) {}
+
       return result;
       
     } catch (e) {
@@ -390,10 +443,10 @@ class CloudSaveService {
         currentOperation: 'Finding latest save',
       ));
       
-      // Search latest backup within the logged-in username folder regardless of device-specific clinic id
-      var latest = await _backup.getLatestBackup(null);
+      // Search latest backup within the clinic folder
+      var latest = await _backup.getLatestBackup();
       if (latest == null) {
-        final all = await _backup.listBackups(null);
+        final all = await _backup.listBackups();
         if (all.isNotEmpty) {
           latest = all.first;
         }
@@ -434,9 +487,9 @@ class CloudSaveService {
       ));
       
       final parsed = jsonDecode(utf8.decode(encryptedBytes)) as Map<String, dynamic>;
-      // Decrypt strictly with username-based shared key only
-      final usernameForKey = await _backup.getCurrentUsernameFolder();
-      final encryptionKey = await _encryption.deriveEncryptionKey(usernameForKey, usernameForKey);
+  // Decrypt with clinic-based shared key
+  final clinicKeyId = await _backup.getCurrentClinicId();
+  final encryptionKey = await _encryption.deriveEncryptionKey(clinicKeyId, clinicKeyId);
       final decryptedData = await _encryption.decryptData(EncryptedData.fromJson(parsed), encryptionKey);
       _log('restoreFromCloud: decryption succeeded');
       
@@ -455,14 +508,13 @@ class CloudSaveService {
         );
       }
       
-      // Step 5: Import data with conflict resolution
+      // Step 5: Import data using merge (no deletions). Remote newer wins per row; local ties kept.
       _updateState(CloudSaveState.restoring(
         progress: 0.8,
-        currentOperation: 'Importing data',
+        currentOperation: 'Merging data',
       ));
-      
       await _importDataWithConflictResolution(cloudData);
-      _log('restoreFromCloud: import completed');
+      _log('restoreFromCloud: merge completed');
       
       // Step 6: Update metadata
       _updateState(CloudSaveState.restoring(
@@ -479,20 +531,26 @@ class CloudSaveService {
         duration: stopwatch.elapsed,
         metadata: {
           'save_timestamp': cloudData.timestamp.toIso8601String(),
-          // Show username provenance instead of device id to avoid confusion
-          'save_user': await _backup.getCurrentUsernameFolder(),
+          'clinic_id': await _backup.getCurrentClinicId(),
           'tables_restored': cloudData.tables.length,
         },
       );
       
       final now = DateTime.now();
       _updateState(CloudSaveState.idle(lastSaveTime: now));
+
+      // Notify app that data has changed so UI can refresh immediately
+      try {
+        _database.notifyDataChanged();
+      } catch (_) {}
       
       // Show notification if enabled
       if (_showNotifications) {
         _showSaveNotification('Data restored from cloud successfully');
       }
-      
+  // Immediately recompute sync enable state for the UI
+  try { await refreshSyncStatus(); } catch (_) {}
+
       return result;
       
     } catch (e) {
@@ -518,8 +576,8 @@ class CloudSaveService {
   /// Check if any backup exists in cloud for this clinic
   Future<bool> hasAnyCloudBackup() async {
     try {
-      // Consider any .enc backup under the user folder as eligible
-      final latest = await _backup.getLatestBackup(null);
+  // Consider any .enc backup under the clinic folder as eligible
+  final latest = await _backup.getLatestBackup();
       return latest != null;
     } catch (_) {
       return false;
@@ -536,13 +594,18 @@ class CloudSaveService {
 
   /// Starts listening for data changes to trigger auto-save
   void _startAutoSaveListener() {
-    // Listen to database changes and trigger debounced auto-save
-    _database.changesStream.listen((_) {
+    // Ensure only one subscription is active
+    _changesSubscription?.cancel();
+    _changesSubscription = _database.changesStream.listen((_) async {
       if (_autoSaveEnabled) {
         _scheduleAutoSave();
       }
+      // Always refresh sync status so manual Sync button updates when there
+      // are local edits, regardless of auto-save setting
+      try { await refreshSyncStatus(); } catch (_) {}
     });
-    // Also refresh the sync enable flag on any change
+    // Initial refresh
+    // ignore: discarded_futures
     refreshSyncStatus();
   }
 
@@ -556,7 +619,10 @@ class CloudSaveService {
     _autoSaveTimer?.cancel();
     _autoSaveTimer = Timer(_autoSaveDelay, () async {
       if (_autoSaveEnabled && _currentState.status != CloudSaveStatus.saving) {
-        await saveNow();
+        // Skip quietly if not linked yet
+        if (await _backup.isReady()) {
+          await saveNow();
+        }
       }
     });
   }
@@ -636,10 +702,12 @@ class CloudSaveService {
   Future<DateTime?> _getLastSaveTime() async {
     try {
       final metadata = await _database.getSyncMetadata('cloud_save');
-      if (metadata != null && metadata['last_save_timestamp'] != null) {
-        return DateTime.fromMillisecondsSinceEpoch(
-          metadata['last_save_timestamp'] as int,
-        );
+      if (metadata != null) {
+        // Preferred key written by _updateSaveMetadata via DatabaseService.updateSyncMetadata
+        final ts = (metadata['last_sync_timestamp'] ?? metadata['last_save_timestamp']);
+        if (ts is int) {
+          return DateTime.fromMillisecondsSinceEpoch(ts);
+        }
       }
     } catch (e) {
       print('Failed to get last save time: $e');
@@ -678,10 +746,10 @@ class CloudSaveService {
     return syncTables;
   }
 
-  /// Generates a user-scoped save file name with timestamp (user portable)
-  String _generateSaveFileName(String usernameFolder) {
+  /// Generates a clinic-scoped save file name with timestamp
+  String _generateSaveFileName(String clinicId) {
     final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-');
-    return 'docledger_save_${usernameFolder}_$timestamp.enc';
+    return 'docledger_save_${clinicId}_$timestamp.enc';
   }
 
   /// Heuristic: consider DB empty if exported snapshot has no rows in sync tables
@@ -704,7 +772,7 @@ class CloudSaveService {
   /// Cleans up old save files (keeps last 10)
   Future<void> _cleanupOldSaves() async {
     try {
-      await _backup.cleanupOldBackups(await _backup.getCurrentUsernameFolder(), keep: 10, clinicId: null);
+  await _backup.cleanupOldBackups(await _backup.getCurrentClinicId(), keep: 10);
     } catch (e) {
       // Non-critical error, log but don't fail the save operation
       print('Warning: Failed to cleanup old saves: $e');

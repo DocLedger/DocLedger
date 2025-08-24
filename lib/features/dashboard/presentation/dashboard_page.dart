@@ -12,8 +12,7 @@ class DashboardPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final repo = serviceLocator.get<DataRepository>();
     final width = MediaQuery.sizeOf(context).width;
-    final isCompact = width < 900;
-    final isVeryCompact = width < 520;
+  final isCompact = width < 900;
 
   // Single metrics list card that combines the three small boxes into one.
   // If height is null, the card will size to its content (removes extra whitespace).
@@ -62,18 +61,7 @@ class DashboardPage extends StatelessWidget {
                 ),
               );
 
-          // Build rows with dividers using a Column sized to content.
-          final rows = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              metricRow('Total Patients', patients.toString(), Icons.people),
-              const Divider(height: 0),
-              metricRow("Patient Visits Today", todayVisits.toString(), Icons.event_available),
-              const Divider(height: 0),
-              metricRow('Follow-ups (7d)', pendingFollowUps.toString(), Icons.schedule),
-            ],
-          );
+          // Build rows for compact (content-sized) layout.
             // Build rows for compact (content-sized) layout.
             final compactRows = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,17 +96,10 @@ class DashboardPage extends StatelessWidget {
       );
     }
 
-    Widget body = Column(
+  Widget body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('Dashboard', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
-            _SyncStatusIcon(repo: repo),
-          ],
-        ),
-        const SizedBox(height: 12),
+        // Header is now shown in the AppBar (like Patients/Analytics). No in-body title.
   if (isCompact) ...[
     // Compact screens (Android): Metrics first, then Today, then the remaining two boxes.
     metricsListCard(),
@@ -238,14 +219,19 @@ class DashboardPage extends StatelessWidget {
       ],
     );
 
-    if (embedded) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: body,
-      );
-    }
+    // Always use an AppBar (requested) whether embedded in shell or not
     return Scaffold(
-      appBar: AppBar(title: const Text('Dashboard')),
+      appBar: AppBar(
+        title: const Text('Dashboard'),
+        centerTitle: false,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: _SyncStatusIcon(repo: repo),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: body),
     );
   }
@@ -262,7 +248,7 @@ class _TodayFollowUpsList extends StatelessWidget {
     return FutureBuilder<List<dynamic>>(
       future: repo.getUpcomingFollowUps(limit: 12),
       builder: (context, snapshot) {
-        final items = (snapshot.data ?? const <dynamic>[]) as List;
+        final List<dynamic> items = snapshot.data ?? const <dynamic>[];
         final filtered = items.whereType<models.Visit>().where((v) {
           final d = DateUtils.dateOnly(v.followUpDate ?? v.visitDate);
           return d == today;
@@ -316,12 +302,12 @@ class _UpcomingList extends StatelessWidget {
     return FutureBuilder<List<dynamic>>(
       future: repo.getUpcomingFollowUps(limit: 6),
       builder: (context, snapshot) {
-        final items = snapshot.data ?? const <dynamic>[];
+  final items = snapshot.data ?? const <dynamic>[];
         if (items.isEmpty) {
           return const Center(child: Text('No upcoming follow-ups'));
         }
         final tomorrow = DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
-        final filtered = (items as List)
+  final filtered = items
             .whereType<models.Visit>()
             .where((v) => DateUtils.dateOnly(v.followUpDate ?? v.visitDate).isAfter(tomorrow.subtract(const Duration(days: 1))))
             .toList();
@@ -381,7 +367,7 @@ class _RecentPatientsList extends StatelessWidget {
         final list = ListView.separated(
           physics: const NeverScrollableScrollPhysics(),
           shrinkWrap: true,
-          itemCount: (items as List).length,
+          itemCount: items.length,
           separatorBuilder: (_, __) => const Divider(height: 8),
           itemBuilder: (context, i) {
             final p = items[i] as models.Patient;
@@ -416,10 +402,10 @@ class _DashboardCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3)),
+    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+      color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -443,61 +429,7 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _MetricTile extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-  const _MetricTile({required this.title, required this.value, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme;
-    const double iconBox = 40;
-    const double gap = 12;
-    return SizedBox.expand(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                width: iconBox,
-                height: iconBox,
-                decoration: BoxDecoration(
-                  color: color.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(child: Icon(icon, color: color.primary)),
-              ),
-              const SizedBox(width: gap),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(color: Colors.grey, fontSize: 15),
-                  maxLines: 2,
-                  softWrap: true,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.only(left: iconBox + gap),
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              softWrap: false,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// _MetricTile removed (unused)
 
 class _SyncStatusIcon extends StatelessWidget {
   final DataRepository repo;

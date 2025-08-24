@@ -28,30 +28,72 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _hasCloudBackup = false;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   String? _loggedInUsername;
+  String? _clinicId;
   String? _accountMessage;
+  bool _accountHydrated = false;
   
   @override
   void initState() {
     super.initState();
     try {
-      _cloudSaveService = serviceLocator.get<CloudSaveService>();
-      _webdavService = serviceLocator.get<WebDavBackupService>();
+  _cloudSaveService = serviceLocator.get<CloudSaveService>();
+  _webdavService = serviceLocator.get<WebDavBackupService>();
       _cloudSaveService?.stateStream.listen((state) {
         if (mounted) setState(() => _currentState = state);
       });
       _currentState = _cloudSaveService?.currentState;
-      _loadLoggedInUsername();
+  _loadLoggedInUsername();
     } catch (e) {
       setState(() { _isLoading = false; });
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _ensureAccountHydrated();
+  }
+
+  void _ensureAccountHydrated() async {
+    if (_accountHydrated) return;
+    try {
+      final linked = await (_webdavService?.isReady() ?? Future.value(false));
+      if (!linked) return;
+      bool changed = false;
+      if (_clinicId == null || _clinicId!.isEmpty) {
+        try {
+          final cid = await _webdavService!.getCurrentClinicId();
+          if (mounted) {
+            setState(() { _clinicId = cid; });
+            changed = true;
+          }
+        } catch (_) {}
+      }
+    if (_loggedInUsername == null || _loggedInUsername!.isEmpty) {
+        try {
+      final u = _webdavService!.getCurrentUsernameCached() ?? await _secureStorage.read(key: 'webdav_username');
+          if (u != null && u.isNotEmpty && mounted) {
+            setState(() { _loggedInUsername = u; });
+            changed = true;
+          }
+        } catch (_) {}
+      }
+      if (changed) {
+        setState(() { _accountHydrated = true; });
+      } else {
+        _accountHydrated = true;
+      }
+    } catch (_) {}
+  }
+
   Future<void> _loadLoggedInUsername() async {
     try {
-      final stored = await _secureStorage.read(key: 'webdav_username');
+    final stored = await _secureStorage.read(key: 'webdav_username');
+    final clinicId = await _secureStorage.read(key: 'webdav_clinic_id');
       if (mounted) {
         setState(() {
           _loggedInUsername = stored;
+      _clinicId = clinicId;
           // Keep any explicit message; else show logged in line if available
         });
       }
@@ -89,7 +131,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildAccountSection() {
-    final isMobile = MediaQuery.sizeOf(context).width < 600;
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -99,10 +140,11 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             Text('Account', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
-            Container(
+      Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceVariant.withValues(alpha: 0.4),
+        // Match the Free Plan card background tone
+        color: Theme.of(context).colorScheme.surfaceVariant.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -126,8 +168,10 @@ class _SettingsPageState extends State<SettingsPage> {
     final String text;
     if (_accountMessage != null && _accountMessage!.isNotEmpty) {
       text = _accountMessage!;
-    } else if (_loggedInUsername != null && _loggedInUsername!.isNotEmpty) {
-      text = 'Logged in as ${_loggedInUsername!}';
+    } else if ((_loggedInUsername != null && _loggedInUsername!.isNotEmpty) || (_clinicId != null && _clinicId!.isNotEmpty)) {
+      final who = _loggedInUsername ?? 'unknown-user';
+      final cid = _clinicId ?? 'unknown-clinic';
+      text = 'Logged in as $who';
     } else {
       text = 'No account linked';
     }
@@ -135,9 +179,10 @@ class _SettingsPageState extends State<SettingsPage> {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-  color: color.surfaceVariant.withValues(alpha: 0.4),
+  // Keep inner message box color as before (slightly lifted surface)
+  color: color.surface.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(12),
-  border: Border.all(color: color.outlineVariant.withValues(alpha: 0.4)),
+  border: Border.all(color: color.outlineVariant.withValues(alpha: 0.25)),
       ),
       child: Row(
         children: [
@@ -161,21 +206,14 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _webDavAccountRow() {
-    final linkedFuture = _webdavService?.isReady() ?? Future.value(false);
+  final linkedFuture = _webdavService?.isReady() ?? Future.value(false);
     return FutureBuilder<bool>(
       future: linkedFuture,
       builder: (context, snapshot) {
         final linked = snapshot.data == true;
-        if (linked && (_loggedInUsername == null || _loggedInUsername!.isEmpty)) {
-          // Try to derive username from the runtime service when linked
-          try {
-            _webdavService?.getCurrentUsernameFolder().then((u) {
-              if (!mounted) return;
-              if (_loggedInUsername == null || _loggedInUsername!.isEmpty) {
-                setState(() { _loggedInUsername = u; });
-              }
-            });
-          } catch (_) {}
+        if (linked && !_accountHydrated) {
+          // Hydrate missing account info on rebuilds (e.g., tab switches)
+          _ensureAccountHydrated();
         }
         return Row(
           children: [
@@ -198,11 +236,60 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             const SizedBox(width: 12),
-            FilledButton.icon(
-              onPressed: _isLoading ? null : _openLoginFromLinkDialog,
-              icon: const Icon(Icons.login, size: 18),
-              label: Text(linked ? 'Relink' : 'Login'),
-            ),
+            if (!linked)
+              FilledButton.icon(
+                onPressed: _isLoading ? null : _openLoginFromLinkDialog,
+                icon: const Icon(Icons.login, size: 18),
+                label: const Text('Login'),
+                style: MediaQuery.sizeOf(context).width < 600
+                    ? FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14))
+                    : null,
+              )
+            else
+              OutlinedButton.icon(
+                onPressed: _isLoading
+                    ? null
+                    : () async {
+                        setState(() => _isLoading = true);
+                        try {
+                          await _webdavService!.logout();
+                          // Clear local UI state
+                          setState(() {
+                            _loggedInUsername = null;
+                            _clinicId = null;
+                            _accountMessage = null;
+                          });
+                          // Inform cloud save service to recompute status
+                          await _cloudSaveService?.refreshSyncStatus();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Logged out.')),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Logout failed: $e')),
+                            );
+                          }
+                        } finally {
+                          if (mounted) setState(() => _isLoading = false);
+                        }
+                      },
+                icon: const Icon(Icons.logout, size: 18),
+                label: const Text('Logout'),
+                style: OutlinedButton.styleFrom(
+                  // Softer error tint and a lighter outline to match overall theme
+                  foregroundColor: Theme.of(context).colorScheme.error.withValues(alpha: 0.85),
+                  side: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6),
+                    width: 1.0,
+                  ),
+                  padding: MediaQuery.sizeOf(context).width < 600
+                      ? const EdgeInsets.symmetric(horizontal: 16, vertical: 14)
+                      : null,
+                ),
+              ),
           ],
         );
       },
@@ -217,8 +304,8 @@ class _SettingsPageState extends State<SettingsPage> {
       if (!ensured) return;
     }
 
-    final usernameController = TextEditingController();
-    final passwordController = TextEditingController(); // placeholder for future
+  final usernameController = TextEditingController();
+  final passwordController = TextEditingController(); // plain text for initial phase
     final formKey = GlobalKey<FormState>();
 
     final confirmed = await showDialog<bool>(
@@ -227,8 +314,10 @@ class _SettingsPageState extends State<SettingsPage> {
         title: const Text('Login to Cloud'),
         content: Form(
           key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
             children: [
               TextFormField(
                 controller: usernameController,
@@ -240,21 +329,32 @@ class _SettingsPageState extends State<SettingsPage> {
                 controller: passwordController,
                 decoration: const InputDecoration(labelText: 'Password'),
                 obscureText: true,
-              ),
-            ],
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+              ],
+            ),
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              if (formKey.currentState?.validate() == true) {
-                Navigator.of(context).pop(true);
-              }
-            },
-            child: const Text('Continue'),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+                style: MediaQuery.sizeOf(context).width < 600
+                    ? TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14))
+                    : null,
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (formKey.currentState?.validate() == true) {
+                    Navigator.of(context).pop(true);
+                  }
+                },
+                child: const Text('Continue'),
+                style: MediaQuery.sizeOf(context).width < 600
+                    ? FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14))
+                    : null,
+              ),
+            ],
       ),
     );
 
@@ -273,29 +373,43 @@ class _SettingsPageState extends State<SettingsPage> {
         throw Exception('Server credentials not set');
       }
 
-      // Verify user and ensure folder
-      final ok = await _verifyUserAndPrepareFolder(username);
+      // Apply credentials to the runtime service to ensure `isReady()` reflects link state now
+      try {
+        await _webdavService!.setCredentials(creds['baseUrl']!, creds['email']!, creds['password']!);
+      } catch (_) {}
+
+    // Find clinic for credentials (plain text compare) using index/scan
+  // Ensure index scaffolding exists before lookup (idempotent)
+  try { await _webdavService!.ensureClinicsIndex(); } catch (_) {}
+  final clinicId = await _webdavService!.findClinicForCredentials(username, passwordController.text);
+    final ok = clinicId != null;
       if (!mounted) return;
       if (!ok) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User not found in users directory.')),
+      const SnackBar(content: Text('User not found in clinics metadata.')),
         );
         return;
       }
 
-      // Set username folder into service so CloudSaveService can upload there
-      await _webdavService!.setUsernameFolder(username);
+  // Set clinic id for clinic-centric backups
+  await _webdavService!.setClinicId(clinicId!);
+  // Cache username for hydration across tab switches
+  try { await _webdavService!.setCurrentUsername(username); } catch (_) {}
 
       // Update UI immediately and persist username (best effort on desktop)
-      if (mounted) setState(() { _loggedInUsername = username; });
-      try { await _secureStorage.write(key: 'webdav_username', value: username); } catch (_) {}
+  if (mounted) setState(() { _loggedInUsername = username; _clinicId = clinicId; });
+  try { await _secureStorage.write(key: 'webdav_username', value: username); } catch (_) {}
+  try { await _secureStorage.write(key: 'webdav_clinic_id', value: clinicId); } catch (_) {}
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Logged in successfully.')),
+        const SnackBar(content: Text('Logged in successfully. Cloud index verified.')),
       );
 
-      // Optional: trigger a first backup or handle restore prompt
-      await _handlePostLink();
+  // Refresh sync readiness so controls update immediately
+  try { await _cloudSaveService?.refreshSyncStatus(); } catch (_) {}
+
+  // Optional: trigger a first backup or handle restore prompt
+  await _handlePostLink();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -388,7 +502,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 onPressed: () {
                   Navigator.of(context).pushNamed(SubscriptionPage.routeName);
                 },
-                child: const Text('Manage'),
+        style: MediaQuery.sizeOf(context).width < 600
+          ? FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14))
+          : null,
+        child: const Text('Manage'),
               ),
             ],
           ),
@@ -427,6 +544,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: 'Auto-Save to Cloud',
                   subtitle: 'Automatically save your data to cloud',
                   value: _cloudSaveService?.autoSaveEnabled ?? true,
+                  redWhenOff: true,
                   onChanged: (!linked || _cloudSaveService == null) ? null : (value) async {
                     await _cloudSaveService!.setAutoSaveEnabled(value);
                     setState(() {});
@@ -436,6 +554,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: 'WiFi Only',
                   subtitle: 'Only save to cloud when connected to WiFi',
                   value: _cloudSaveService?.wifiOnlyMode ?? true,
+                  redWhenOff: true,
                   onChanged: (!linked || _cloudSaveService == null) ? null : (value) async {
                     await _cloudSaveService!.setWifiOnlyMode(value);
                     setState(() {});
@@ -445,6 +564,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: 'Show Notifications',
                   subtitle: 'Show notifications when data is saved or restored',
                   value: _cloudSaveService?.showNotifications ?? true,
+                  redWhenOff: true,
                   onChanged: (!linked || _cloudSaveService == null) ? null : (value) async {
                     await _cloudSaveService!.setShowNotifications(value);
                     setState(() {});
@@ -587,6 +707,8 @@ class _SettingsPageState extends State<SettingsPage> {
               builder: (context, snapshot) {
                 final linked = snapshot.data == true;
                 if (!isWorking && linked) {
+                  final bool syncEnabled = _cloudSaveService?.shouldEnableSync ?? false;
+                  final bool restoreEnabled = _hasCloudBackup == true;
                   return Padding(
                     padding: const EdgeInsets.only(top: 16),
                     child: isMobile
@@ -594,16 +716,19 @@ class _SettingsPageState extends State<SettingsPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               FilledButton.icon(
-                                onPressed: (_cloudSaveService?.shouldEnableSync ?? false) ? _syncNow : null,
+                                onPressed: syncEnabled ? _syncNow : null,
                                 icon: const Icon(Icons.sync, size: 18),
                                 label: const Text('Sync with Cloud'),
+                                style: MediaQuery.sizeOf(context).width < 600
+                                    ? FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14))
+                                    : null,
                               ),
                             ],
                           )
                         : Row(
                             children: [
                               FilledButton.icon(
-                                onPressed: (_cloudSaveService?.shouldEnableSync ?? false) ? _syncNow : null,
+                                onPressed: syncEnabled ? _syncNow : null,
                                 icon: const Icon(Icons.sync, size: 18),
                                 label: const Text('Sync with Cloud'),
                               ),
@@ -726,7 +851,10 @@ class _SettingsPageState extends State<SettingsPage> {
     // Let the UI settle, then trigger a save (respects WiFi-only and auth checks internally)
     Future.delayed(const Duration(seconds: 2), () async {
       try {
-        await _cloudSaveService!.saveNow();
+        // Only run an immediate save if auto-save is enabled
+        if (_cloudSaveService!.autoSaveEnabled) {
+          await _cloudSaveService!.saveNow();
+        }
       } catch (_) {
         // Ignore; status card will show any error
       } finally {
@@ -746,7 +874,7 @@ class _SettingsPageState extends State<SettingsPage> {
         if (!any) {
           try {
             final svc = serviceLocator.get<WebDavBackupService>();
-            final list = await svc.listBackups(null);
+            final list = await svc.listBackups();
             any = list.isNotEmpty;
           } catch (_) {}
         }
@@ -954,6 +1082,7 @@ class _SettingsPageState extends State<SettingsPage> {
     await _secureStorage.write(key: 'webdav_password', value: password);
   }
 
+  // Deprecated: username marker flow replaced by clinic-centric metadata
   Future<bool> _verifyUserAndPrepareFolder(String username) async {
     final creds = await _loadServerCreds();
     if (creds == null) return false;
@@ -966,7 +1095,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final authHeader = 'Basic ' + base64Encode(utf8.encode('$email:$password'));
 
     // Verify user marker exists
-    final markerUri = Uri.parse('$base/docledger_backups/users/$username.json');
+  final markerUri = Uri.parse('$base/docledger_backups/clinics-index/by-username/$username.json');
     final markerResp = await http.get(markerUri, headers: {
       'Authorization': authHeader,
     });
@@ -1001,12 +1130,14 @@ class _SettingSwitch extends StatelessWidget {
   final String subtitle;
   final bool value;
   final ValueChanged<bool>? onChanged;
+  final bool redWhenOff;
 
   const _SettingSwitch({
     required this.title,
     required this.subtitle,
     required this.value,
     required this.onChanged,
+  this.redWhenOff = false,
   });
 
   @override
@@ -1036,10 +1167,27 @@ class _SettingSwitch extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-          ),
+          Builder(builder: (context) {
+            final enabled = onChanged != null;
+            final isOff = !value;
+            final showRed = enabled && redWhenOff && isOff;
+            final scheme = Theme.of(context).colorScheme;
+            return Switch(
+              value: value,
+              onChanged: onChanged,
+        // Softer red styling when OFF (still enabled)
+        thumbColor: showRed
+          ? MaterialStateProperty.resolveWith<Color?>((_) => scheme.error.withValues(alpha: 0.55))
+          : null,
+        trackColor: showRed
+          ? MaterialStateProperty.resolveWith<Color?>((_) => scheme.error.withValues(alpha: 0.22))
+          : null,
+        // Remove dark outline to match the app's soft surfaces
+        trackOutlineColor: showRed
+          ? MaterialStateProperty.resolveWith<Color?>((_) => Colors.transparent)
+          : null,
+            );
+          }),
         ],
       ),
     );

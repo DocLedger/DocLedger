@@ -38,6 +38,16 @@ Future<void> initializeServices() async {
     // WebDAV backup service
     final webDavService = WebDavBackupService();
     await webDavService.initialize();
+    // If credentials were persisted earlier, re-apply them to ensure link state
+    try {
+      const storage = FlutterSecureStorage();
+      final base = await storage.read(key: 'webdav_base_url');
+      final email = await storage.read(key: 'webdav_email');
+      final pass = await storage.read(key: 'webdav_password');
+      if (base != null && email != null && pass != null && base.isNotEmpty && email.isNotEmpty && pass.isNotEmpty) {
+        await webDavService.setCredentials(base, email, pass);
+      }
+    } catch (_) {}
     serviceLocator.registerSingleton<WebDavBackupService>(webDavService);
 
     // Cloud Save service using WebDAV

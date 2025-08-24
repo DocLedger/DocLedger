@@ -75,9 +75,9 @@ class _VisitFormPageState extends State<VisitFormPage> {
               final row = Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: TextButton.icon(
                       onPressed: _pickFollowUpDateTime,
-                      icon: const Icon(Icons.calendar_month),
+                      icon: const Icon(Icons.event),
                       label: Align(
                         alignment: Alignment.centerLeft,
                         child: Text(dateLabel, overflow: TextOverflow.ellipsis),

@@ -6,7 +6,6 @@ import '../../../../core/services/service_locator.dart';
 import '../../../../core/data/models/data_models.dart';
 import '../../../../core/data/repositories/data_repository.dart';
 import '../../../../core/cloud/services/cloud_save_service.dart';
-import '../../../settings/presentation/pages/settings_page.dart';
 import '../widgets/patient_list_item.dart';
 import 'patient_detail_page.dart';
 
@@ -66,18 +65,26 @@ class _PatientListPageState extends State<PatientListPage> {
         final visits = await _dataRepository.getVisitsForPatient(p.id);
         final payments = await _dataRepository.getPaymentsForPatient(p.id);
         final paidByVisit = <String, double>{};
+        double unlinkedPaid = 0;
         for (final pay in payments) {
-          if (pay.visitId == null) continue;
+          if (pay.visitId == null) {
+            unlinkedPaid += pay.amount;
+            continue;
+          }
           paidByVisit.update(pay.visitId!, (v) => v + pay.amount, ifAbsent: () => pay.amount);
         }
-        double dueTotal = 0;
+        // Compute due per-visit
+        double billedTotal = 0;
+        double paidTotal = 0;
         for (final v in visits) {
-          final total = (v.fee ?? 0);
-          final paid = (paidByVisit[v.id] ?? 0);
-          final due = (total - paid);
-          if (due > 0) dueTotal += due;
+          final fee = (v.fee ?? 0);
+          billedTotal += fee;
+          paidTotal += (paidByVisit[v.id] ?? 0);
         }
-        if (dueTotal > 0) dueMap[p.id] = dueTotal;
+        // Apply unlinked payments towards overall due for this patient
+  final totalDue = (billedTotal - (paidTotal + unlinkedPaid));
+  final double dueClamped = totalDue > 0 ? totalDue : 0.0;
+  if (dueClamped > 0) dueMap[p.id] = dueClamped;
       }
       _dueByPatient = dueMap;
     } catch (e) {
@@ -101,6 +108,16 @@ class _PatientListPageState extends State<PatientListPage> {
   Future<void> _onRefresh() async {
     // Trigger manual cloud save
     try {
+      if (!_cloudSaveService.autoSaveEnabled) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Auto-Save is disabled'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
       final result = await _cloudSaveService.saveNow();
       if (!mounted) return;
       if (result.isSuccess) {
@@ -132,9 +149,7 @@ class _PatientListPageState extends State<PatientListPage> {
     await _loadPatients();
   }
 
-  void _navigateToSyncSettings() {
-    Navigator.of(context).pushNamed(SettingsPage.routeName);
-  }
+  // Sync settings navigation no longer used here.
 
   void _addPatient() {
     _showAddPatientDialog();
@@ -299,7 +314,7 @@ class _PatientListPageState extends State<PatientListPage> {
                     decoration: const InputDecoration(labelText: 'Date of Birth', border: OutlineInputBorder()),
                     child: Row(
                       children: [
-                        Expanded(child: Text(dateOfBirth != null ? '${dateOfBirth!.day}/${dateOfBirth!.month}/${dateOfBirth!.year}' : 'Pick a date')),
+                        Expanded(child: Text(dateOfBirth != null ? '${dateOfBirth!.day}/${dateOfBirth!.month}/${dateOfBirth!.year}' : '-')),
                         TextButton.icon(
                           onPressed: () async {
                             final now = DateTime.now();
@@ -320,6 +335,7 @@ class _PatientListPageState extends State<PatientListPage> {
                           icon: const Icon(Icons.event),
                           label: const Text('Pick date'),
                         ),
+                        // No Clear button; DOB is optional and can be left unset
                       ],
                     ),
                   ),
@@ -336,12 +352,6 @@ class _PatientListPageState extends State<PatientListPage> {
           FilledButton(
             onPressed: () async {
               if (!formKey.currentState!.validate()) return;
-              if (dateOfBirth == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please select Date of Birth')),
-                );
-                return;
-              }
               final patient = Patient(
                 id: DateTime.now().millisecondsSinceEpoch.toString(),
                 name: nameController.text.trim(),

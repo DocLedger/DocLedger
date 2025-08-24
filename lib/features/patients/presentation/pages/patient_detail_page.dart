@@ -339,7 +339,7 @@ extension on _PatientDetailPageState {
                         decoration: const InputDecoration(labelText: 'Date of Birth', border: OutlineInputBorder()),
                         child: Row(
                           children: [
-                            Expanded(child: Text(dob != null ? _formatDate(dob!) : 'Pick a date')),
+                            Expanded(child: Text(dob != null ? _formatDate(dob!) : '-')),
                             TextButton.icon(
                               onPressed: () async {
                                 final now = DateTime.now();
@@ -360,6 +360,7 @@ extension on _PatientDetailPageState {
                               icon: const Icon(Icons.event),
                               label: const Text('Pick date'),
                             ),
+                            // No Clear button; DOB is optional and can be left unset
                           ],
                         ),
                       ),
@@ -379,7 +380,7 @@ extension on _PatientDetailPageState {
 
     if (ok == true) {
       if (!mounted) return;
-      if (!(formKey.currentState?.validate() ?? false) || dob == null) {
+      if (!(formKey.currentState?.validate() ?? false)) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all fields correctly')));
         return;
       }
@@ -532,10 +533,18 @@ class _Totals {
 extension on _PatientDetailPageState {
   _Totals _computeTotals() {
     double billed = 0;
-    double paid = 0;
+  double paid = 0;
     for (final v in _visits) {
       billed += (v.fee ?? 0);
       paid += (_paidByVisit[v.id] ?? 0);
+    }
+    // Also include any payments that are not linked to a specific visit
+    // so that patient-level "Paid" matches analytics revenue semantics.
+    // These can occur from legacy imports or manual entries.
+    for (final p in _payments) {
+      if (p.visitId == null) {
+        paid += p.amount;
+      }
     }
     final outstanding = (billed - paid).clamp(0, double.infinity).toDouble();
     return _Totals(
@@ -638,11 +647,30 @@ extension on _PatientDetailPageState {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(controller: diagnosis, decoration: const InputDecoration(labelText: 'Diagnosis')),
+                    TextField(
+                      controller: diagnosis,
+                      decoration: const InputDecoration(
+                        labelText: 'Diagnosis',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
                     const SizedBox(height: 6),
-                    TextField(controller: prescriptions, decoration: const InputDecoration(labelText: 'Prescriptions')),
+                    TextField(
+                      controller: prescriptions,
+                      decoration: const InputDecoration(
+                        labelText: 'Prescriptions',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
                     const SizedBox(height: 6),
-                    TextField(controller: feeCtrl, decoration: const InputDecoration(labelText: 'Fee (Rs.)'), keyboardType: TextInputType.number),
+                    TextField(
+                      controller: feeCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Fee (Rs.)',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
                     const SizedBox(height: 6),
                     InputDecorator(
                       decoration: const InputDecoration(labelText: 'Follow-up', border: OutlineInputBorder()),
@@ -652,10 +680,10 @@ extension on _PatientDetailPageState {
                             child: Text(
                               followUp != null
                                   ? '${_formatDate(followUp!)}${followUpTime != null ? ' • ${MaterialLocalizations.of(context).formatTimeOfDay(followUpTime!)}' : ''}'
-                                  : 'Pick a date',
+                                  : '-',
                             ),
                           ),
-                          OutlinedButton.icon(
+                          TextButton.icon(
                             onPressed: () async {
                               final now = DateTime.now();
                               final initial = followUp != null
@@ -681,14 +709,22 @@ extension on _PatientDetailPageState {
                                 });
                               }
                             },
-                            icon: const Icon(Icons.calendar_month),
+                            icon: const Icon(Icons.event),
                             label: const Text('Pick date & time'),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 6),
-                    TextField(controller: notes, decoration: const InputDecoration(labelText: 'Notes')),
+                    TextField(
+                      controller: notes,
+                      decoration: const InputDecoration(
+                        labelText: 'Notes',
+                        border: OutlineInputBorder(),
+                      ),
+                      minLines: 1,
+                      maxLines: 4,
+                    ),
                   ],
                 ),
               );
@@ -752,11 +788,30 @@ extension on _PatientDetailPageState {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(controller: diagnosis, decoration: const InputDecoration(labelText: 'Diagnosis')),
+                    TextField(
+                      controller: diagnosis,
+                      decoration: const InputDecoration(
+                        labelText: 'Diagnosis',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
                     const SizedBox(height: 6),
-                    TextField(controller: prescriptions, decoration: const InputDecoration(labelText: 'Prescriptions')),
+                    TextField(
+                      controller: prescriptions,
+                      decoration: const InputDecoration(
+                        labelText: 'Prescriptions',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
                     const SizedBox(height: 6),
-                    TextField(controller: feeCtrl, decoration: const InputDecoration(labelText: 'Fee (Rs.)'), keyboardType: TextInputType.number),
+                    TextField(
+                      controller: feeCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Fee (Rs.)',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
                     const SizedBox(height: 6),
                     InputDecorator(
                       decoration: const InputDecoration(labelText: 'Follow-up', border: OutlineInputBorder()),
@@ -766,10 +821,10 @@ extension on _PatientDetailPageState {
                             child: Text(
                               followUp != null
                                   ? '${_formatDate(followUp!)}${followUpTime != null ? ' • ${MaterialLocalizations.of(context).formatTimeOfDay(followUpTime!)}' : ''}'
-                                  : 'Pick a date',
+                                  : '-',
                             ),
                           ),
-                          OutlinedButton.icon(
+                          TextButton.icon(
                             onPressed: () async {
                               final now = DateTime.now();
                               final initial = followUp != null
@@ -795,14 +850,22 @@ extension on _PatientDetailPageState {
                                 });
                               }
                             },
-                            icon: const Icon(Icons.calendar_month),
+                            icon: const Icon(Icons.event),
                             label: const Text('Pick date & time'),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 6),
-                    TextField(controller: notes, decoration: const InputDecoration(labelText: 'Notes')),
+                    TextField(
+                      controller: notes,
+                      decoration: const InputDecoration(
+                        labelText: 'Notes',
+                        border: OutlineInputBorder(),
+                      ),
+                      minLines: 1,
+                      maxLines: 4,
+                    ),
                   ],
                 ),
               );
